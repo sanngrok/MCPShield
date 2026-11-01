@@ -22,7 +22,9 @@ try {
     if (options.v2Relayer && !process.argv.includes("--scan-only")) {
       try {
         await reconcileV2Actions(store, options.v2Relayer);
-        const { head, indexedBlock, lag, observedAt } = await indexV2(store, options.v2Relayer, { deploymentBlock: Number(process.env.CONTROL_V2_DEPLOYMENT_BLOCK ?? 0), confirmations: Number(process.env.CONTROL_V2_CONFIRMATIONS ?? 2) });
+        // Same read budget as the API's admission reads; controlConfig() already rejected an invalid value at startup.
+        const { head, indexedBlock, lag, observedAt } = await indexV2(store, options.v2Relayer, { deploymentBlock: Number(process.env.CONTROL_V2_DEPLOYMENT_BLOCK ?? 0), confirmations: Number(process.env.CONTROL_V2_CONFIRMATIONS ?? 2),
+          readTimeoutMs: process.env.CONTROL_V2_READ_TIMEOUT_MS ? Number(process.env.CONTROL_V2_READ_TIMEOUT_MS) : undefined });
         console.log(JSON.stringify({ event: "chain.synchronized", chainId: options.v2Relayer.chainId, head, indexedBlock, lag, observedAt }));
       } catch { console.error(JSON.stringify({ event: "chain.synchronization.failed", code: "RPC_UNAVAILABLE" })); }
     }

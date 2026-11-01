@@ -10,7 +10,7 @@ async function indexedTransaction<T>(store: ControlStore, client: V2Relayer, txH
 }
 
 // maxBlocks bounds one eth_getLogs range: public Base RPCs refuse more than 200 blocks per call.
-export async function indexV2(store: ControlStore, client: V2Relayer, { deploymentBlock = 0, confirmations = 2, maxBlocks = 500 } = {}) {
+export async function indexV2(store: ControlStore, client: V2Relayer, { deploymentBlock = 0, confirmations = 2, maxBlocks = 500, readTimeoutMs = undefined as number | undefined } = {}) {
   const chainId = client.chainId, registry = client.registryAddress.toLowerCase();
   const transactionKey = `v2-indexer:${chainId}:${registry}`;
   let checkpoints;
@@ -83,7 +83,7 @@ export async function indexV2(store: ControlStore, client: V2Relayer, { deployme
       });
     }
   }
-  const read = v2ChainReader({ rpcUrls: [client.rpcUrl], registryContract: client.registryAddress, chainId, confirmations });
+  const read = v2ChainReader({ rpcUrls: [client.rpcUrl], registryContract: client.registryAddress, chainId, confirmations, timeoutMs: readTimeoutMs });
   try { for (const { tenantId, release } of tenants) {
     const scans = (await store.scans(tenantId)).filter((scan) => scan.releaseId === release.releaseId && scan.status === "COMPLETED");
     const latest = scans[0]; if (!latest) continue;

@@ -58,9 +58,11 @@ export function controlConfig(env = process.env): ControlOptions | undefined {
     scannerOptions: { sandbox: env.CONTROL_SANDBOX_MODE === "docker" ? "docker" : undefined, allowRemoteAi,
       ...(allowRemoteAi ? { aiProvider: aiProvider as "custom" | "openai", aiModel: env.CONTROL_AI_MODEL, aiUrl: env.CONTROL_AI_URL, aiToken, aiTimeoutMs, aiDisclosurePolicy } : {}) },
     // The V2 reader works unchanged on V3: getDecision keeps its layout, and reportRoot carries the deciding round id.
+    // A public RPC far from the chain needs more than the 1.5 s default for one decision read (ADR-009: 1.0-2.5 s on Base Sepolia).
     chainDecision: env.CONTROL_V2_RPC_URLS ? v2ChainReader({ rpcUrls: env.CONTROL_V2_RPC_URLS.split(","),
       registryContract: registryAddress, chainId: Number(env.CONTROL_V2_CHAIN_ID),
-      confirmations: Number(env.CONTROL_V2_CONFIRMATIONS ?? "2") }) : undefined,
+      confirmations: Number(env.CONTROL_V2_CONFIRMATIONS ?? "2"),
+      timeoutMs: env.CONTROL_V2_READ_TIMEOUT_MS ? Number(env.CONTROL_V2_READ_TIMEOUT_MS) : undefined }) : undefined,
     v2Relayer: env.CONTROL_V2_RELAYER_KEY && env.CONTROL_V2_RPC_URLS ? new V2Relayer(env.CONTROL_V2_RPC_URLS.split(",")[0], registryAddress, Number(env.CONTROL_V2_CHAIN_ID), env.CONTROL_V2_RELAYER_KEY, registryVersion) : undefined,
     receiptRelayer: env.CONTROL_RECEIPT_RPC_URL ? new ReceiptRelayer(env.CONTROL_RECEIPT_RPC_URL, env.CONTROL_RECEIPT_REGISTRY_ADDRESS!, Number(env.CONTROL_RECEIPT_CHAIN_ID), env.CONTROL_RECEIPT_RELAYER_KEY!, Number(env.CONTROL_RECEIPT_CONFIRMATIONS ?? 2)) : undefined,
   };
