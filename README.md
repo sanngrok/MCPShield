@@ -1,11 +1,42 @@
 # MCPShield
 
-## 멘토·심사위원께 (2026-10-26 업데이트)
+## 멘토·심사위원께 (2026-11-02 업데이트)
 
 MCPShield는 AI Agent가 쓰는 MCP 서버의 **새 버전마다** 정확한 배포본을 검사하고, 여러 회사가 나눠 맡도록 설계한 검증자 3명 중 2명의 판정(2-of-3)을 블록체인에 기록한 뒤, Gateway가 **도구를 실행하기 직전에** 그 판정을 강제하는 공급망 보안 프로토타입입니다.
 
 MCP 서버 목록 사이트에는 비슷한 이름의 스캐너가 여럿 있습니다. MCPShield의 차이는 세 가지입니다: **업데이트마다 재검증 · 실행 전 강제 · 다기관 판정**.
-실제 사례로 2025년 9월 npm `postmark-mcp` 패키지가 업데이트 한 번으로 보내는 모든 메일을 외부 주소로 몰래 숨은참조(BCC)하도록 바뀐 사례가 보고되었습니다. 우리 메일 MCP 시나리오와 거의 같은 구조입니다(원 출처는 확인 후 링크를 답니다. [v2.1 §18.0](docs/MCPShield_캡스톤_최종_마스터문서_v2.1.md) 참고).
+실제 사례로 2025년 9월 npm `postmark-mcp` 패키지가 1.0.16 업데이트에서 코드 한 줄로 보내는 모든 메일을 외부 주소로 몰래 숨은참조(BCC)하도록 바뀐 사례가 보고되었습니다([The Hacker News, Koi Security 보고](https://thehackernews.com/2025/09/first-malicious-mcp-server-found.html)). 공식 Postmark 도구가 아니라 이름을 흉내 낸 비공식 패키지이고, MCPShield가 그 사건을 잡았다는 뜻이 아닙니다.
+
+### 증거 모음 (Evidence)
+
+**Base Sepolia (chain 84532) 실거래.** [ReleaseRegistryV3 `0xa3F067039A119a06E8ec924b429936a0C7cEF604`](https://sepolia.basescan.org/address/0xa3F067039A119a06E8ec924b429936a0C7cEF604) · 배포 기록 [`deployments/base-sepolia-v3.json`](deployments/base-sepolia-v3.json) · 거래 기록 [`transactions.json`](benchmarks/results/base-sepolia-v3-demo-2026-10-26/transactions.json)
+
+| # | 거래 | 블록 | Basescan |
+|---|---|---|---|
+| 1 | 기본 정책 게시 (PolicyRegistry) | 50368835 | [0x3d464ad1…3101](https://sepolia.basescan.org/tx/0x3d464ad194609212d210c3623ea434975e6f659da22031a009fe041b70723101) |
+| 2 | 1.0.0 등록 | 50368865 | [0xabeef725…50a2](https://sepolia.basescan.org/tx/0xabeef7253bd826417fc901d6f2520004f7b37fb684ed5038ac434098abc050a2) |
+| 3 | 1.0.1 등록 | 50368895 | [0x85feadad…349f](https://sepolia.basescan.org/tx/0x85feadad0479017fabe045f9acd26d4cc0f2f554dfdec8e9fed2bbb2637e349f) |
+| 4 | 검증자 A PASS (1.0.0) | 50368945 | [0xc77028ca…8d10](https://sepolia.basescan.org/tx/0xc77028ca29e035b517fafe14ef5a1f307952a54fa6462dd8c973053962658d10) |
+| 5 | 검증자 B PASS → VERIFIED (1.0.0) | 50368978 | [0x6cc3a594…8c05](https://sepolia.basescan.org/tx/0x6cc3a594d1da153fc4e3593fc41f7acdb42ef8a64e0f8e0d137fe5818fab8c05) |
+| 6 | 검증자 C 늦은 보류 (1.0.0, 반대표 보존을 보이려 넣은 연출 표) | 50369012 | [0x88778028…cb61](https://sepolia.basescan.org/tx/0x88778028a08be78313ebf1832a13d423a27ec6a030297fe6250dce4d736dcb61) |
+| 7 | 검증자 C 직접 긴급 격리 (1.0.1, 검증자 지갑 발신) | 50369061 | [0x47c67605…e84d](https://sepolia.basescan.org/tx/0x47c67605f3e5e68921ec4b73d87a929d49c4017fa08a84b0f1a083ebf1f4e84d) |
+| 8 | 검증자 A FAIL (1.0.1) | 50369071 | [0x85b9b7be…6655](https://sepolia.basescan.org/tx/0x85b9b7be7e8a4d7af40d6cdfa7891538eef53ad74c4a678bd869d770bc246655) |
+| 9 | 검증자 B FAIL → REVOKED (1.0.1) | 50369081 | [0xb11b0a31…1644](https://sepolia.basescan.org/tx/0xb11b0a314eab3706262b7a1e4e95fb2f9b442593a743183432a67ee4f11b1644) |
+| 10 | 검증자 C 늦은 FAIL (1.0.1, 판정 뒤 기록) | 50369092 | [0xf0f17d6f…0d78](https://sepolia.basescan.org/tx/0xf0f17d6f8eeddd9e15b0342923e0c24845f79536353fac60dae7bbd6c4e10d78) |
+
+- 검증자 표의 `evidenceHash`는 [증거 파일](benchmarks/results/base-sepolia-v3-demo-2026-10-26/) 각각의 sha256과 같습니다. 10건은 검증자 키 3개를 쥔 시연 스크립트([`base-sepolia-v3-demo.ts`](scripts/demo/base-sepolia-v3-demo.ts))가 만들었고, 표 6건은 운영사 중계 계정이 제출했습니다(검증자 주소는 서명에서 복원되어 `VoteRecorded`에 남음).
+- 승인은 24시간 유효입니다. 1.0.0은 2026-10-27부터 만료(EXPIRED)로 읽히고 발표 전에 다시 검사해 승인합니다. 폐기된 1.0.1은 영구히 REVOKED입니다.
+- gas: 승인 1건(등록 + PASS 2표) 584,401 · 격리까지 간 폐기 1건(등록 + 격리 + FAIL 2표) 724,456 · 10건 합계 1,654,596 (0.006 gwei).
+
+**Base Sepolia 리허설 (2026-11-02, 버리는 배포).** 최종 시연 구성을 새 배포에서 처음부터 끝까지 다시 돌렸습니다: A사 검증자 GPT-6.1 Terra 증인, B사 규칙과 시험 환경만, C사 Gemini 3.5 Flash 증인과 긴급 격리. [기록](benchmarks/results/base-sepolia-v3-rehearsal-2026-11-02/README.md)
+- 1.0.0은 세 곳 PASS로 VERIFIED, 1.0.1은 C사 긴급 격리 뒤 세 곳 FAIL로 REVOKED. 거래 13건, 수수료 0.00003 ETH. 표 6건의 `evidenceHash`는 증거 파일 sha256과 같습니다.
+- 두 회사 Gateway 장면(`npm run demo:gateways`, 공개 RPC, 표본 20): 호출마다 판정을 다시 받아도 p50 A사 1,098 ms · B사 1,092 ms. 운영사 연결을 끊으면 A사는 멈추고 B사는 계속 씁니다. 1.0.1은 두 회사 모두 프로세스를 띄우기 전에 거부했습니다.
+
+**고정 40개 평가 (정상 20 · 공격 20, 5개 비교군).** 정답은 작성자 라벨이며 2인 검토 중입니다.
+- 로컬 모델 2종 × 3회: [`eval40-2026-10-26`](benchmarks/results/eval40-2026-10-26/summary.md) · Gemini 3.5 Flash-Lite × 3회: [`eval40-gemini-3.5-flash-lite-2026-10-27`](benchmarks/results/eval40-gemini-3.5-flash-lite-2026-10-27/summary.md) · Gemini 2.5 Flash · 3.5 Flash × 1회: [`eval40-gemini-2026-10-26`](benchmarks/results/eval40-gemini-2026-10-26/summary.md) · GPT-6.1 Terra · GPT-6 Luna × 3회: [`eval40-openai-2026-11-02`](benchmarks/results/eval40-openai-2026-11-02/summary.md)
+- MCPTox(외부 485건, 정적 문구 규칙만): [`mcptox-static-2026-09-09.json`](benchmarks/results/mcptox-static-2026-09-09.json)
+
+**직접 돌려 보기.** Docker 없이 V3 전체 흐름(운영사 API · 인덱서 · 검증자 3곳 · 대시보드): `npm run demo:v3`, 자동 확인은 `npm run demo:v3-smoke`. 두 회사 Gateway 장면은 `npm run demo:v3 -- --seed --data <폴더>`를 띄운 뒤 `npm run demo:gateways -- --stack <폴더>` ([`scripts/demo/README.md`](scripts/demo/README.md)). 검증자에 AI 증인을 붙이는 방법은 [`apps/validator/README.md`](apps/validator/README.md)의 AI witness 절을 보세요.
 
 ### 먼저 보실 곳
 
@@ -31,10 +62,13 @@ MCP 서버 목록 사이트에는 비슷한 이름의 스캐너가 여럿 있습
 | 완료 | v2.1 기준 문서, ADR-003~007, 멘토링 응답 문서 | 문서·결정 기록입니다. v2.0은 보존합니다. |
 | 완료 | GitHub 기본 브랜치를 `master/main`으로 변경 | 이전 `main`은 9월 초 해커톤 상태 그대로입니다. |
 | 로컬 구현·검증 | 회사 A·B 두 Gateway 장면: 운영사 장애, 악성 업데이트 폐기(두 Gateway 모두 실행 전 거부), 운영사 admission 서명 키 탈취, 검증자 직접 긴급 격리 | Ganache 로컬 EVM(`LOCAL_EVM`)에서 실행합니다. 스캐너는 고정 보고서 대역(`REPORT FIXTURE`)이며 실제 Docker 검사는 이 장면에 포함되지 않습니다. 검증자 3명은 팀이 운영하는 테스트 키로 운영사 템플릿에 서명합니다(결과 표시 `SINGLE_INSTITUTION_DEMO`, `SIGNS_OPERATOR_TEMPLATE_NO_INDEPENDENT_RESCAN`). |
+| 완료 | 두 회사 Gateway 장면을 실제 V3 스택에서 실행(`npm run demo:gateways`): 검증자 3곳이 각자 검사하고 증거에 서명한 표로 승인·폐기 | 로컬 Ganache와 Base Sepolia 리허설(위 증거 모음)에서 실행했습니다. 검증자 키 3개는 팀이 운영합니다(`SINGLE_INSTITUTION_DEMO`). |
 | 로컬 구현·검증 | 실행 오버헤드 측정: Gateway 유무별 도구 호출 지연(stdio 기준), 긴급 격리 후 각 Gateway 차단까지 시간, 장애 시 읽기·쓰기 동작(5개 경우, 만료 캐시 포함) | 공식 측정(커밋 `f85f8e8`, Windows 개발 PC·Node v24.13.0, 표본 50): 호출 p50 직접 0.24 ms / Gateway A 62.87 ms / Gateway B 61.69 ms, 긴급 격리 후 다음 호출 거부까지 A·B 각 126 ms([결과 JSON](benchmarks/results/consortium-scene-f85f8e8-2026-10-10T18-00-42-747Z.json)). 로컬 체인은 즉시 채굴이라 전파 시간은 하한값입니다. 2-of-3 폐기가 실행 중 세션에 전파되는 시간은 아직 재지 않았습니다. |
-| 다음 단계 | `docker compose`·대시보드를 회사 2개 스택(V2 + 서명 admission)으로 이전 | 현재 Compose는 V1 + 레거시 무서명 admission입니다. |
-| 완료 | Base Sepolia에 ReleaseRegistryV3 배포, 승인·긴급 격리·폐기 거래 10건, 두 회사 Gateway의 체인 직접 판정(1.0.0 허용, 1.0.1 차단) | 검증자 3곳과 관리자 키는 팀이 운영합니다. 운영사 API·인덱서·`docker compose`는 아직 V3로 옮기지 않았습니다([3차 응답](docs/mentoring-3rd-response.md)). |
-| 부분 완료 | 실제 AI 모델 호출: 고정 40개 표본 × (로컬 모델 2개, 무료 Gemini 3.5 Flash-Lite) × 3회 반복 | 소형 로컬 모델은 탐지를 거의 더하지 못했습니다. Gemini 3.5 Flash-Lite는 규칙을 통과한 정상에서 오탐 0회, 규칙이 놓친 공격에서 성공 7회 중 4회 의심, 응답 형식 오류 120회 중 42회입니다(결과 그대로 보고, [3차 응답](docs/mentoring-3rd-response.md)). Gemini 2.5 Flash·3.5 Flash는 하루 20회 한도로 나눠 실행 중입니다. |
+| 레거시 유지 | `docker compose` 경로 | Compose는 V1 레지스트리 + 레거시 무서명 admission이며 CI 회귀 테스트로만 씁니다. 최종 시연 경로는 Docker 없는 V3 스택(`npm run demo:v3`)입니다. |
+| 완료 | Base Sepolia에 ReleaseRegistryV3 배포, 승인·긴급 격리·폐기 거래 10건(위 증거 모음) | 검증자 3곳과 관리자 키는 팀이 운영합니다(`SINGLE_INSTITUTION_DEMO`). |
+| 완료 | 운영사 API·인덱서·검증자 중계·대시보드의 V3 전환(`CONTROL_V3_REGISTRY_ADDRESS`) | 로컬 Ganache로 자동 테스트합니다(`tests/api/v3-fullcycle.test.ts`, `tests/integration/v3-local-stack.test.ts`). |
+| 완료 | V3 검증자의 AI 증인(검증자별 모델 설정, 무응답이면 보류) | AI 의심과 AI 무응답은 보류(ABSTAIN)만 만들고, FAIL·긴급 격리는 결정론적 증거로만 납니다(ADR-002). |
+| 완료 | 실제 AI 모델 호출: 고정 40개 표본 × 모델 7종(로컬 2 · Gemini 3 · OpenAI 2) | Gemini 3.5 Flash(표본당 1회)는 규칙이 놓친 공격 9개 중 8개에 보류 표를 냈고, 규칙 통과 정상 18개 중 응답한 17개에서 오탐 1개, 형식 실패 0이었습니다. 나머지 1개(HTTP 502 무응답)는 새 규칙에서 보류가 됩니다. 3회 반복에서 규칙이 놓친 공격 27회 중 의심은 GPT-6 Luna 21회, GPT-6.1 Terra 12회였고, 규칙 통과 정상에서 오탐은 두 모델 모두 0이었습니다. 로컬 소형 모델은 형식·인용 실패 148/240회, Flash-Lite는 42/120회. 결과는 그대로 보고합니다. |
 
 ### 보장 범위
 
