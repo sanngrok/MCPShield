@@ -2,6 +2,7 @@
 // indexer, three validators that each scan their own copy and vote through the operator relay, and the dashboard.
 //   node --import tsx scripts/demo/v3-local-stack.mts                 in-process Ganache with a fresh V3 deployment
 //   node --import tsx scripts/demo/v3-local-stack.mts --smoke         same, drives 1.0.0 and 1.0.1 itself, checks, exits
+//   node --import tsx scripts/demo/v3-local-stack.mts --seed          drives them the same way, then keeps running (gateway-scene.mts)
 //   node --import tsx scripts/demo/v3-local-stack.mts --base-sepolia  V3 on Base Sepolia: sends real testnet transactions
 // Loopback only. Private keys are never printed or written; the dashboard login token is generated per data directory.
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -27,19 +28,23 @@ import { defaultPolicy, hash, type ControlOptions } from "../../apps/api/src/con
 import { bytes32, createReleaseRegistryV3 } from "../../packages/contracts-sdk/src/v3.js";
 // @ts-expect-error Resolver is shared ESM JavaScript.
 import { resolveArtifact } from "../../services/resolver/src/resolver.mjs";
+// @ts-expect-error The eval40 adapter is shared ESM JavaScript.
+import { DEFAULT_UPSTREAMS, createEvalAiAdapter } from "../../benchmarks/eval40/ai-adapter.mjs";
 
 const { values } = parseArgs({ options: {
   "base-sepolia": { type: "boolean", default: false }, deploy: { type: "boolean", default: false }, deployment: { type: "string" }, "index-from": { type: "string" },
   "api-port": { type: "string", default: "3001" }, "dashboard-port": { type: "string", default: "3000" }, "no-dashboard": { type: "boolean", default: false },
-  data: { type: "string" }, smoke: { type: "boolean", default: false },
+  data: { type: "string" }, smoke: { type: "boolean", default: false }, seed: { type: "boolean", default: false }, ai: { type: "string", multiple: true }, order: { type: "string", default: "C,A,B" },
 } });
 const repo = resolve(import.meta.dirname, "../.."), baseSepolia = values["base-sepolia"];
 process.chdir(repo); // the API resolves the shipped demo fixtures relative to the repository root
 const FIXTURES = ["mail-mcp-1.0.0", "mail-mcp-1.0.1"].map((name) => join(repo, "demo/fixtures", name));
 const NAMES = ["A", "B", "C"] as const;
-// C goes first and holds the emergency brake in the demo story. A and B then vote one by one, each after the validator before it
-// has finished with the same scan, so C's quarantine always lands before a FAIL quorum whatever the scan speed of the machine.
-const ORDER = ["C", "A", "B"] as const;
+type Name = (typeof NAMES)[number];
+// Validators vote one by one, each after the validator before it has finished with the same scan. The default puts C first:
+// C holds the emergency brake in the demo story, so its quarantine always lands before a FAIL quorum whatever the machine's speed.
+const ORDER = values.order!.split(",") as Name[];
+if (ORDER.length !== 3 || NAMES.some((name) => !ORDER.includes(name))) throw new Error("ORDER_INVALID");
 const TURN_WAIT_MS = 180_000; // a stuck validator does not hold the others forever
 const time = () => new Date().toLocaleTimeString("ko-KR", { hour12: false });
 const log = (who: string, text: string) => console.log(`${time()} [${who}] ${text}`);
@@ -48,7 +53,7 @@ const short = (value?: string | null) => value ? `${value.slice(0, 10)}…${valu
 if (values.deploy && !baseSepolia) throw new Error("DEPLOY_FLAG_IS_FOR_BASE_SEPOLIA");
 
 type Chain = { label: string; rpc: string; chainId: number; relayerKey: string; validatorKeys: string[]; registry: string; policyRegistry: string;
-  deploymentBlock: number; confirmations: number; maxBlocks: number; close: () => Promise<unknown> };
+  deploymentBlock: number; confirmations: number; maxBlocks: number; readTimeoutMs?: number; close: () => Promise<unknown> };
 
 async function localChain(): Promise<Chain> {
   // Compile before the chain starts: a multi-second solc stall during chain traffic times out RPC requests.
@@ -82,9 +87,35 @@ async function baseSepoliaChain(dataDir: string): Promise<Chain> {
   if (deployment.chainId !== 84532 || deployment.registryContract !== "ReleaseRegistryV3") throw new Error("DEPLOYMENT_NOT_BASE_SEPOLIA_V3");
   return { label: "Base Sepolia · chain 84532 (실제 테스트넷 거래)", rpc, chainId: 84532, relayerKey, validatorKeys,
     registry: deployment.releaseRegistry.address, policyRegistry: deployment.policyRegistry.address,
-    deploymentBlock: Number(values["index-from"] ?? deployment.releaseRegistry.blockNumber), confirmations: 2, maxBlocks: 200, close: async () => {} };
+    deploymentBlock: Number(values["index-from"] ?? deployment.releaseRegistry.blockNumber), confirmations: 2, maxBlocks: 200,
+    readTimeoutMs: 3000, close: async () => {} }; // a public RPC read from Korea takes 1.0-2.5 s (ADR-009)
 }
 
+// Before any chain work: a mistyped --ai or a missing key must not cost a testnet deployment.
+// --ai A=openai:gpt-6.1-terra --ai C=gemini:gemini-3.5-flash gives that validator its own AI witness (ADR-002: a witness can
+// hold a release, never revoke it; a witness that does not answer holds a clean scan). OpenAI is called directly; Gemini goes
+// through the eval40 loopback adapter, which turns the Responses call into Gemini's chat API. Keys stay in the secrets folder.
+const secretsDir = process.env.MCPSHIELD_SECRETS_DIR ?? join(homedir(), ".mcpshield-secrets");
+const aiScan: Partial<Record<Name, Record<string, unknown>>> = {}, aiLabel: string[] = [], aiAdapters: any[] = [];
+for (const spec of values.ai ?? []) {
+  const match = /^([ABC])=(openai|gemini):([A-Za-z0-9._:-]{1,128})$/.exec(spec);
+  if (!match) throw new Error("AI_SPEC_INVALID");
+  const [, name, provider, model] = match as unknown as [string, Name, "openai" | "gemini", string];
+  if (provider === "openai") {
+    aiScan[name] = { allowRemoteAi: true, aiProvider: "openai", aiModel: model, aiToken: (await readFile(join(secretsDir, "openai.key"), "utf8")).trim(), aiTimeoutMs: 120_000 };
+  } else {
+    const upstream = DEFAULT_UPSTREAMS[model];
+    if (!upstream) throw new Error("AI_MODEL_UNKNOWN");
+    const env = await readFile(join(secretsDir, "eval40.env"), "utf8").catch(() => "");
+    const key = /^GEMINI_API_KEY=(.+)$/m.exec(env)?.[1]?.trim() ?? (await readFile(join(secretsDir, "gemini.key"), "utf8")).trim();
+    const token = randomBytes(24).toString("hex");
+    const { server } = createEvalAiAdapter({ token, keys: { [model]: key }, upstreams: { [model]: upstream } });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    aiAdapters.push(server);
+    aiScan[name] = { allowRemoteAi: true, aiProvider: "openai", aiModel: model, aiUrl: `http://127.0.0.1:${server.address().port}/v1/responses`, aiToken: token, aiTimeoutMs: 120_000 };
+  }
+  aiLabel.push(`${name}=${model}`);
+}
 const dataDir = values.data ? resolve(values.data) : await mkdtemp(join(tmpdir(), "mcpshield-v3-stack-"));
 await mkdir(dataDir, { recursive: true });
 // Per data directory: login tokens, the evidence encryption key and the admission signing key survive a restart with --data.
@@ -98,12 +129,13 @@ const stack = await readFile(stackFile, "utf8").then(JSON.parse).catch(async () 
 });
 const chain = baseSepolia ? await baseSepoliaChain(dataDir) : await localChain();
 const policyHash = hash(defaultPolicy);
+
 const relayer = new V2Relayer(chain.rpc, chain.registry, chain.chainId, chain.relayerKey, 3);
 const store = await ControlStore.open(join(dataDir, "control.sqlite"));
 const options: ControlOptions = { store, credentials: [{ token: stack.adminToken, tenantId: stack.tenantId, role: "admin" }, { token: stack.readerToken, tenantId: stack.tenantId, role: "reader" },
   ...stack.validatorTokens.map((token: string) => ({ token, tenantId: stack.tenantId, role: "operator" as const }))],
   artifactPath: join(dataDir, "artifacts"), evidencePath: join(dataDir, "evidence"), evidenceKey: stack.evidenceKey, signingKey: stack.signingKey, signingKeyId: stack.signingKeyId,
-  v2Relayer: relayer, chainDecision: v2ChainReader({ rpcUrls: [chain.rpc], registryContract: chain.registry, chainId: chain.chainId, confirmations: chain.confirmations }) };
+  v2Relayer: relayer, chainDecision: v2ChainReader({ rpcUrls: [chain.rpc], registryContract: chain.registry, chainId: chain.chainId, confirmations: chain.confirmations, timeoutMs: chain.readTimeoutMs }) };
 const app = await buildApp({ databasePath: ":memory:", adminApiToken: randomBytes(24).toString("hex"), scannerApiToken: randomBytes(24).toString("hex"), controlPlane: options });
 await app.listen({ host: "127.0.0.1", port: Number(values["api-port"]) }); // --api-port 0 picks a free port
 const apiUrl = `http://127.0.0.1:${(app.server.address() as any).port}`;
@@ -128,7 +160,7 @@ const turn = (scanId: string, name: string) => {
   if (!turns.has(key)) { const entry = { settled: false, done: () => { entry.settled = true; } }; turns.set(key, entry); }
   return turns.get(key)!;
 };
-const waitTurn = async (scanId: string, name: (typeof NAMES)[number]) => {
+const waitTurn = async (scanId: string, name: Name) => {
   const before = ORDER[ORDER.indexOf(name) - 1];
   if (!before) return;
   for (const deadline = Date.now() + TURN_WAIT_MS; accepting && !turn(scanId, before).settled && Date.now() < deadline;) await sleep(250);
@@ -137,7 +169,7 @@ loop("운영사 검사", 1000, async () => { while (!stopping && await runContro
 loop("체인 전송", 1000, async () => { while (!stopping && await runChainActionOnce(store, relayer)); });
 loop("인덱서", 3000, async () => {
   await reconcileV2Actions(store, relayer);
-  await indexV2(store, relayer, { deploymentBlock: chain.deploymentBlock, confirmations: chain.confirmations, maxBlocks: chain.maxBlocks });
+  await indexV2(store, relayer, { deploymentBlock: chain.deploymentBlock, confirmations: chain.confirmations, maxBlocks: chain.maxBlocks, readTimeoutMs: chain.readTimeoutMs });
 });
 // The default policy must be active on chain before any vote; already published = no transaction.
 await enqueueChainAction(store, relayer, stack.tenantId, "PUBLISH_POLICY", { policyHash });
@@ -170,9 +202,11 @@ for (const [index, name] of NAMES.entries()) {
         if (!copy) { log(who, `검사 ${scan.scanId.slice(0, 8)} · 같은 바이트의 자기 사본이 없어 투표하지 않음`); continue; }
         try {
           const run = await runValidatorV3({ privateKey: chain.validatorKeys[index], rpcUrl: chain.rpc, chainId: chain.chainId, registryAddress: chain.registry, policyHash,
-            artifactDir: copy.dir, evidenceDir: join(dataDir, `validator-${name}`, "evidence"), relay: { apiUrl, token, scanId: scan.scanId }, quarantine: name === "C" });
+            artifactDir: copy.dir, evidenceDir: join(dataDir, `validator-${name}`, "evidence"), relay: { apiUrl, token, scanId: scan.scanId }, quarantine: name === "C",
+            scan: aiScan[name] });
           const txs = run.transactions.map((tx: any) => `${tx.kind === "QUARANTINE" ? "긴급 격리" : "투표"} ${short(tx.txHash)}`).join(" · ");
-          log(who, `${copy.label} · 자기 검사 ${run.verdict}${run.basis.length ? ` (${run.basis.join(", ")})` : ""} · 증거 ${short(run.evidenceHash)} · ${run.skipped === "ALREADY_VOTED" ? "이미 투표함" : txs}`);
+          const witness = run.ai ? ` · AI 증인 ${run.ai.model} ${run.ai.status === "COMPLETED" ? "응답함" : "응답 없음"}` : "";
+          log(who, `${copy.label} · 자기 검사 ${run.verdict}${run.basis.length ? ` (${run.basis.join(", ")})` : ""}${witness} · 증거 ${short(run.evidenceHash)} · ${run.skipped === "ALREADY_VOTED" ? "이미 투표함" : txs}`);
         } catch (error) { log(who, `${copy.label} · 투표 실패 · ${code(error)}`); }
       } finally { mine.done(); }
     }
@@ -198,6 +232,7 @@ async function shutdown(exitCode = 0) {
   await Promise.allSettled(loops);
   await heartbeat.stop();
   await app.close(); // also closes the store, the relayer and the chain reader
+  for (const server of aiAdapters) server.close();
   await chain.close();
   if (!values.data) await rm(dataDir, { recursive: true, force: true });
   process.exit(exitCode);
@@ -208,12 +243,13 @@ console.log([
   "", `MCPShield V3 로컬 시연 스택 · ${chain.label}`,
   `  ReleaseRegistryV3 ${chain.registry}`, `  운영 API ${apiUrl} (검증자 표 중계·인덱서 포함)`,
   ...(dashboard ? [`  대시보드 http://127.0.0.1:${values["dashboard-port"]}/console · 로그인 토큰은 ${stackFile} 의 adminToken`] : []),
-  "  검증자 A·B·C: 각자 사본을 검사하고 자기 증거에 서명해 운영사 중계로 투표합니다. C가 긴급 격리를 맡고, 순서는 C → A → B입니다.",
+  `  검증자 A·B·C: 각자 사본을 검사하고 자기 증거에 서명해 운영사 중계로 투표합니다. C가 긴급 격리를 맡고, 순서는 ${ORDER.join(" → ")}입니다.`,
+  `  AI 증인: ${aiLabel.length ? aiLabel.join(", ") : "없음 (규칙과 미끼 시험 환경만)"}`,
   "  진행: 새 릴리스 등록(fixture mail-mcp-1.0.0) → 관리자 온체인 등록 → 검사 요청 → 검증자 투표 → 실행 판정 조회. 이어서 mail-mcp-1.0.1.",
   `  데이터 ${dataDir}${values.data ? "" : " (종료 시 삭제)"} · 종료 Ctrl+C`, "",
 ].join("\n"));
 
-if (values.smoke) {
+if (values.smoke || values.seed) {
   // Same path as the dashboard: admin requests through the API; validators vote on their own; then check chain and admission.
   const auth = { authorization: `Bearer ${stack.adminToken}` };
   const post = async (url: string, payload: any = {}, headers: Record<string, string> = {}) => {
@@ -221,7 +257,7 @@ if (values.smoke) {
     if (response.statusCode >= 300) throw new Error(`SMOKE_HTTP_${response.statusCode}`);
     return response.json();
   };
-  const waitFor = async <T>(what: string, check: () => Promise<T | undefined>, timeoutMs = 240_000) => {
+  const waitFor = async <T,>(what: string, check: () => Promise<T | undefined>, timeoutMs = 240_000) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) { const value = await check().catch(() => undefined); if (value !== undefined) return value; await sleep(1000); }
     throw new Error(`SMOKE_TIMEOUT:${what}`);
@@ -232,7 +268,8 @@ if (values.smoke) {
       const release = (await post("/v1/releases/resolve", { sourceType: "fixture", locator: `mail-mcp-${version}` })).release;
       await post(`/v1/releases/${release.releaseId}/register`);
       await waitFor(`register ${version}`, async () => (await reader.releases(release.releaseId)).exists || undefined);
-      await post("/v1/scans", { releaseId: release.releaseId, policyHash }, { "idempotency-key": `smoke-${version}` });
+      // A fresh key per run: with a reused --data directory a fixed key would return yesterday's expired scan.
+      await post("/v1/scans", { releaseId: release.releaseId, policyHash }, { "idempotency-key": `smoke-${version}-${randomBytes(8).toString("hex")}` });
       const view = await waitFor(`votes ${version}`, async () => {
         const response = await app.inject({ url: `/v1/releases/${release.releaseId}/votes`, headers: auth }), body = response.json();
         return response.statusCode === 200 && body.status === expected && body.rounds.some((round: any) => round.votes.filter((vote: any) => vote.cast).length === 3) ? body : undefined;
@@ -244,6 +281,7 @@ if (values.smoke) {
       if (admission !== (expected === "VERIFIED" ? "ALLOW" : "BLOCK")) throw new Error(`SMOKE_ADMISSION_MISMATCH:${version}`);
     }
     log("점검", "통과 · 1.0.0 승인과 실행 허용, 1.0.1 폐기와 실행 차단을 확인했습니다.");
-    await shutdown(0);
+    if (values.smoke) await shutdown(0);
+    else log("점검", `계속 실행합니다 · 두 회사 Gateway 장면: node --import tsx scripts/demo/gateway-scene.mts --stack "${dataDir}"`);
   } catch (error) { log("점검", `실패 · ${code(error)}`); await shutdown(1); }
 }

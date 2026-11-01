@@ -43,6 +43,7 @@
     "demo:smoke": "npm run demo:reset && npm run demo:run",
     "demo:v3": "node --import tsx scripts/demo/v3-local-stack.mts",
     "demo:v3-smoke": "node --import tsx scripts/demo/v3-local-stack.mts --smoke --api-port 0",
+    "demo:gateways": "node --import tsx scripts/demo/gateway-scene.mts",
     "stack:config": "docker compose config --quiet",
     "stack:up": "docker compose up --build --wait",
     "stack:down": "docker compose down --remove-orphans",

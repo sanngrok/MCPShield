@@ -36,7 +36,8 @@ npm.cmd run demo:v3-smoke    # same stack, drives 1.0.0 and 1.0.1 itself, checks
 
 - **Chain:** an in-process Ganache (chain 31337, one block per second, public test keys) with a fresh `ReleaseRegistryV3`.
 - **Operator API:** the `/v1` control plane on V3, with its chain outbox and indexer.
-- **Validators:** A, B and C each keep their own copy of the fixtures. Each one scans its copy and signs its own evidence hash and verdict, then votes through the operator relay. C sends a direct emergency quarantine when its own sandbox sees a deterministic critical finding.
+- **Validators:** A, B and C each keep their own copy of the fixtures. Each one scans its copy and signs its own evidence hash and verdict, then votes through the operator relay. C sends a direct emergency quarantine when its own sandbox sees a deterministic critical finding. They vote one at a time in the order given by `--order` (default `C,A,B`, so C's quarantine lands before a FAIL quorum).
+- **AI witnesses (optional):** `--ai A=openai:gpt-6.1-terra` gives validator A its own model, with the key read from `openai.key` in `MCPSHIELD_SECRETS_DIR`; `--ai C=gemini:gemini-3.5-flash` routes C through the eval40 loopback adapter with the Gemini key from that folder. A witness can only hold a release (ABSTAIN), and one that does not answer also holds a clean scan. These calls cost money or free-tier quota; without `--ai` no model is called.
 - **Dashboard:** `next dev` on `http://127.0.0.1:3000/console`. The admin login token is in the data directory's `stack-local.json`.
 
 In the console:
@@ -48,5 +49,22 @@ In the console:
 6. Repeat with `mail-mcp-1.0.1`.
 
 Without Docker the operator's own scan stays `INCONCLUSIVE`. That is expected: on V3 the operator's scan only sets the round window, and the validators decide. `--data <dir>` keeps the SQLite store, tokens and keys for the next run; without it a temporary directory is deleted on exit. Use a fresh data directory for each fresh local chain: the chain restarts empty while old records would stay. `next dev` rewrites `apps/dashboard/next-env.d.ts`; do not commit that change. `gateway-trust.json` in the data directory holds the public values a Gateway needs.
+
+## Two-company Gateway scene
+
+```powershell
+npm.cmd run demo:v3 -- --seed --no-dashboard --data ./data/v3-demo   # drives 1.0.0 and 1.0.1 like --smoke, then keeps running
+npm.cmd run demo:gateways -- --stack ./data/v3-demo                   # in a second terminal
+```
+
+`scripts/demo/gateway-scene.mts` runs against a stack that is already up, local or `--base-sepolia`, and sends no transaction:
+
+- **Gateway A** trusts the stack's operator API, reached through a local relay that the scene can cut. It uses the reader token from `stack-local.json`.
+- **Gateway B** trusts only company B's own API, which the scene starts with its own tenant, credentials and admission key. B resolves the fixture bytes itself and reads the registry directly. It holds no chain key. `--rpc` gives B a different RPC endpoint from the operator's.
+- **Scene 1:** both Gateways check `mail-mcp-1.0.0`, then call `list_messages` through a real MCP session. Every call is checked again (strict mode). Each company makes `--samples` calls (default 20) after three warm-up rounds, interleaved with direct calls that skip the Gateway.
+- **Scene 2:** the relay to the operator is cut. Gateway A stops; Gateway B carries on.
+- **Scene 3:** both Gateways try to run `mail-mcp-1.0.1`. `run` is tried only after `inspect` has seen `REVOKED` or `QUARANTINED`, so the malicious fixture is never started.
+
+Results go to `gateway-scene.json` in the stack's data directory (`--out` to change). The file records RPC hosts only, never full RPC URLs or tokens.
 
 `--base-sepolia` uses the V3 deployment in `deployments/base-sepolia-v3.json`, or the file given with `--deployment`. It reads the relayer and validator keys from `MCPSHIELD_SECRETS_DIR` (default `~/.mcpshield-secrets`) and sends **real testnet transactions**. `--deploy` first deploys a fresh V3 set and writes its record to the data directory. A release whose bytes were already revoked on that deployment cannot be voted on again, so a full rerun of the 1.0.1 story needs a fresh deployment. Public Base RPCs cap `eth_getLogs` at 200 blocks; the indexer uses that bound, and `--index-from <block>` skips older history.
