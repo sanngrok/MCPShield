@@ -2,13 +2,13 @@
 // it checks that its own copy of the artifact matches the identity on chain, scans that copy itself, writes its
 // own evidence file, and signs the hash of that file with its own verdict. Disagreeing with the other validators
 // is a valid outcome, not an error. Scope: local-source artifacts (the default policy); prepared/OCI stay on v2.ts.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Contract, JsonRpcProvider, Wallet, id } from "ethers";
 import { attestationV3Domain, attestationV3Types, bytes32, createReleaseRegistryV3, exactReleaseIdentity,
-  evidenceDocument, quarantineReason, verdictFromReport } from "../../../packages/contracts-sdk/src/v3.js";
+  evidenceDocument, quarantineReason, verdictFromReport, type V3AiWitness } from "../../../packages/contracts-sdk/src/v3.js";
 import { boundedServiceRequest, checkedServiceUrl, v2RpcRequest } from "../../../packages/contracts-sdk/src/transport.js";
 // @ts-expect-error Resolver and scanner are shared ESM JavaScript.
 import { resolveArtifact } from "../../../services/resolver/src/resolver.mjs";
@@ -33,10 +33,23 @@ export interface ValidatorV3Options {
    * keeps its policy pinned, and confirms the relayed transaction on chain. Emergency quarantine stays a direct transaction. */
   relay?: { apiUrl: string; token: string; scanId: string };
   quarantine?: boolean; dryRun?: boolean;
+  /** Scanner options; aiProvider/aiModel/aiUrl/aiToken with allowRemoteAi: true give this validator its own AI witness. */
   scan?: Record<string, unknown>;
   now?: () => Promise<number>;
 }
 type RelayRequest = (path: string, body?: unknown) => Promise<any>;
+
+/** The AI witness this validator configured, and whether it answered. The scanner falls back to its local analysis when the
+ * model call fails and only says so in its log, so the log is where an unanswered witness is seen. */
+function aiWitness(scan: ValidatorV3Options["scan"], events: any[]): V3AiWitness | undefined {
+  if (scan?.allowRemoteAi !== true) return undefined;
+  const provider = String(scan.aiProvider ?? "custom"), model = typeof scan.aiModel === "string" ? scan.aiModel : null;
+  // Remote AI allowed but no endpoint the scanner would call: it then uses its local analysis without any event, so the
+  // witness counts as unanswered, not absent.
+  if (!(scan.aiUrl || scan.aiProvider === "openai")) return { required: true, provider, model, status: "UNAVAILABLE", error: "AI_NOT_CONFIGURED" };
+  const failed = events.find((event) => event?.event === "ai_analysis_failed");
+  return { required: true, provider, model, status: failed ? "UNAVAILABLE" : "COMPLETED", ...(failed ? { error: String(failed.error) } : {}) };
+}
 
 function relayClient(relay: NonNullable<ValidatorV3Options["relay"]>): RelayRequest {
   const base = checkedServiceUrl(relay.apiUrl);
@@ -98,17 +111,20 @@ export async function runValidatorV3(options: ValidatorV3Options) {
     const release = { releaseId, artifactDigest: bytes32(local.artifactDigest), manifestDigest: bytes32(local.manifestDigest), toolSurfaceDigest: bytes32(local.toolSurfaceHash) };
     if (release.artifactDigest !== onChain.artifactDigest || release.manifestDigest !== onChain.manifestDigest || release.toolSurfaceDigest !== onChain.toolSurfaceDigest
       || exactReleaseIdentity({ toolId: onChain.toolId, ...local }).releaseId !== releaseId) throw new Error("ARTIFACT_IDENTITY_MISMATCH");
-    const report = await scanRelease({ fixtureDir: options.artifactDir, baselineDir: options.baselineDir, sandbox: "local", logger: () => {}, ...options.scan });
+    const aiEvents: any[] = [];
+    const report = await scanRelease({ fixtureDir: options.artifactDir, baselineDir: options.baselineDir, sandbox: "local",
+      logger: (event: any) => { if (typeof event?.event === "string" && event.event.startsWith("ai_")) aiEvents.push(event); }, ...options.scan });
     // The scanner works on its own snapshot; it must be the same bytes that were just matched to the chain.
     if (report.artifactDigest !== local.artifactDigest || bytes32(report.toolSurfaceHash) !== release.toolSurfaceDigest) throw new Error("ARTIFACT_CHANGED_DURING_SCAN");
-    const verdict = verdictFromReport(report);
-    const { file, evidenceHash } = evidenceDocument(wallet.address, release, report, verdict);
+    const ai = aiWitness(options.scan, aiEvents);
+    const verdict = verdictFromReport(report, ai);
+    const { file, evidenceHash } = evidenceDocument(wallet.address, release, report, verdict, ai);
     await mkdir(options.evidenceDir, { recursive: true });
     const evidenceFile = join(options.evidenceDir, `${releaseId.slice(2, 14)}.${wallet.address.slice(2, 10).toLowerCase()}.${evidenceHash.slice(2, 14)}.json`);
     await writeFile(evidenceFile, file);
     const roundId: string = await registry.roundIdOf(releaseId, options.policyHash, validFrom, validUntil, version);
     const result: Record<string, any> = { validator: wallet.address, releaseId, verdict: verdict.verdict, basis: verdict.basis,
-      evidenceHash, evidenceFile, roundId, transactions: [] as any[] };
+      ...(ai ? { ai: { model: ai.model, status: ai.status } } : {}), evidenceHash, evidenceFile, roundId, transactions: [] as any[] };
     const reason = quarantineReason(report);
     if (options.quarantine && reason && !options.dryRun && Number(await registry.lastQuarantineAt(releaseId, wallet.address)) === 0
       && Number(await registry.quarantineUntil(releaseId)) <= head && !(await registry.revoked(releaseId))) {
@@ -145,7 +161,25 @@ async function main() {
   if (required.some((name) => !env[name])) throw new Error("VALIDATOR_TRUST_CONFIG_REQUIRED");
   const args = process.argv.slice(2);
   if (args.some((arg) => !["--quarantine", "--dry-run"].includes(arg))) throw new Error("VALIDATOR_MODE_INVALID");
-  console.log(JSON.stringify(await runValidatorV3({ privateKey: env.VALIDATOR_PRIVATE_KEY!, rpcUrl: env.CONTROL_V2_RPC_URLS!.split(",")[0],
+  // Optional AI witness (same names as v2.ts); the token may come from a file so it never sits in the environment of other tools.
+  let scan: ValidatorV3Options["scan"];
+  if (env.VALIDATOR_ALLOW_REMOTE_AI === "true") {
+    const aiToken = env.VALIDATOR_AI_TOKEN_FILE ? (await readFile(env.VALIDATOR_AI_TOKEN_FILE, "utf8")).trim() : env.VALIDATOR_AI_TOKEN;
+    const aiTimeoutMs = Number(env.VALIDATOR_AI_TIMEOUT_MS ?? 120000), provider = env.VALIDATOR_AI_PROVIDER ?? "";
+    // The AI transport refuses these settings before sending anything (services/scanner/src/ai-transport.mjs). Refused there,
+    // they would hold every release as an unanswered witness; refused here, the validator does not start.
+    let endpoint: URL | undefined;
+    try { endpoint = env.VALIDATOR_AI_URL ? new URL(env.VALIDATOR_AI_URL) : undefined; } catch { throw new Error("VALIDATOR_AI_CONFIG_INVALID"); }
+    const loopback = Boolean(endpoint && ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname));
+    if (!env.VALIDATOR_AI_MODEL || !aiToken || !["openai", "custom"].includes(provider)
+      || !Number.isSafeInteger(aiTimeoutMs) || aiTimeoutMs < 1000 || aiTimeoutMs > 120000
+      || (provider === "custom" && !endpoint)
+      || (endpoint && (endpoint.username || endpoint.password || endpoint.hash || !(endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback))))
+      || (provider === "openai" && (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(env.VALIDATOR_AI_MODEL)
+        || (endpoint && !loopback && endpoint.href !== "https://api.openai.com/v1/responses")))) throw new Error("VALIDATOR_AI_CONFIG_INVALID");
+    scan = { allowRemoteAi: true, aiProvider: env.VALIDATOR_AI_PROVIDER, aiModel: env.VALIDATOR_AI_MODEL, aiUrl: env.VALIDATOR_AI_URL || undefined, aiToken, aiTimeoutMs };
+  }
+  console.log(JSON.stringify(await runValidatorV3({ privateKey: env.VALIDATOR_PRIVATE_KEY!, rpcUrl: env.CONTROL_V2_RPC_URLS!.split(",")[0], scan,
     chainId: Number(env.CONTROL_V2_CHAIN_ID), registryAddress: env.CONTROL_V3_REGISTRY_ADDRESS!, policyHash: env.CONTROL_VALIDATOR_POLICY_HASH!,
     releaseId: relay ? undefined : env.VALIDATOR_RELEASE_ID, artifactDir: env.VALIDATOR_ARTIFACT_DIR!, baselineDir: env.VALIDATOR_BASELINE_DIR || undefined,
     validFrom: relay ? undefined : Number(env.VALIDATOR_VALID_FROM), validUntil: relay ? undefined : Number(env.VALIDATOR_VALID_UNTIL), evidenceDir: env.VALIDATOR_EVIDENCE_DIR!,

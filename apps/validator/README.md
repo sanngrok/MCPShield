@@ -112,3 +112,16 @@ the operator's scan. A dissenting vote is relayed and recorded like any other. I
 operator refuses to relay, the same signature can still be sent directly.
 `npm run demo:v3` runs three such validators against a local operator stack
 (`scripts/demo/README.md`).
+
+**AI witness (optional, ADR-002).** `VALIDATOR_ALLOW_REMOTE_AI=true` with
+`VALIDATOR_AI_PROVIDER` (`openai` or `custom`), `VALIDATOR_AI_MODEL`, and the token in
+`VALIDATOR_AI_TOKEN_FILE` (or `VALIDATOR_AI_TOKEN`) gives this validator its own model;
+`VALIDATOR_AI_URL` is needed for `custom` and for a loopback endpoint, and
+`VALIDATOR_AI_TIMEOUT_MS` defaults to 120000 (the maximum). The validator refuses to start
+with a setting the AI transport would refuse: a `custom` provider without a URL, a URL that
+is neither HTTPS nor loopback HTTP, or an `openai` URL other than the official Responses
+endpoint or loopback. The witness can only hold a release: a
+HIGH suspicion signs ABSTAIN, never FAIL. A configured witness that does not answer
+also signs ABSTAIN (`AI_UNAVAILABLE`) for a scan that would otherwise PASS; a
+deterministic FAIL still stands. The evidence file records the witness
+(`ai: { provider, model, status }`), so auditors derive the same verdict from it.

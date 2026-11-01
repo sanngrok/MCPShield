@@ -22,12 +22,24 @@ export function verdictFromFindings(findings, complete = true) {
   return { verdict: "PASS", basis: [] };
 }
 
-export function verdictFromReport(report) {
+export const AI_WITNESS_STATUSES = ["COMPLETED", "UNAVAILABLE"];
+
+/**
+ * `ai` is the validator's own AI witness, when it configured one: { required: true, provider, model, status }.
+ * A witness that did not answer is not a clean bill of health, so a scan that would PASS is held instead;
+ * a deterministic FAIL still stands. Without `ai` (no witness configured) the rule is the plain ADR-002 one.
+ */
+export function verdictFromReport(report, ai) {
   if (!Array.isArray(report?.findings) || !["PASSED", "FAILED"].includes(report?.scanStatus)) return { verdict: "ABSTAIN", basis: ["SCAN_INCOMPLETE"] };
   const result = verdictFromFindings(report.findings, true);
   // A scanner that calls its own result FAILED without a FAIL-grade finding is inconsistent, so never PASS it.
-  return report.scanStatus === "FAILED" && result.verdict === "PASS" ? { verdict: "ABSTAIN", basis: ["SCAN_STATUS_INCONSISTENT"] } : result;
+  if (report.scanStatus === "FAILED" && result.verdict === "PASS") return { verdict: "ABSTAIN", basis: ["SCAN_STATUS_INCONSISTENT"] };
+  if (ai?.required === true && ai.status !== "COMPLETED" && result.verdict === "PASS") return { verdict: "ABSTAIN", basis: ["AI_UNAVAILABLE"] };
+  return result;
 }
+
+const validAiWitness = (ai) => ai !== null && typeof ai === "object" && ai.required === true && AI_WITNESS_STATUSES.includes(ai.status)
+  && typeof ai.provider === "string" && (ai.model === null || typeof ai.model === "string");
 
 /** The deterministic sandbox finding that allows a one-validator emergency quarantine, if any. */
 export function quarantineReason(report) {
@@ -37,8 +49,8 @@ export function quarantineReason(report) {
 }
 
 /** Evidence = this validator's own report bound to its address and the on-chain identity; the hash covers the exact bytes written. */
-export function evidenceDocument(validator, release, report, verdict) {
-  const file = `${JSON.stringify({ schema: EVIDENCE_SCHEMA, validator, release, verdict: verdict.verdict, basis: verdict.basis, report }, null, 2)}\n`;
+export function evidenceDocument(validator, release, report, verdict, ai) {
+  const file = `${JSON.stringify({ schema: EVIDENCE_SCHEMA, validator, release, verdict: verdict.verdict, basis: verdict.basis, ...(ai ? { ai } : {}), report }, null, 2)}\n`;
   return { file, evidenceHash: `0x${createHash("sha256").update(file).digest("hex")}` };
 }
 
@@ -55,7 +67,8 @@ export function checkedVoteEvidence(file, { evidenceHash, validator, release, ve
   let document;
   try { document = JSON.parse(file); } catch { throw new Error("VALIDATOR_EVIDENCE_INVALID"); }
   if (document?.schema !== EVIDENCE_SCHEMA || typeof document.validator !== "string" || document.validator.toLowerCase() !== validator.toLowerCase()
-    || !sameRelease(document.release, release) || !VERDICTS.includes(document.verdict) || !Array.isArray(document.basis)) throw new Error("VALIDATOR_EVIDENCE_BINDING_MISMATCH");
-  const derived = verdictFromReport(document.report);
+    || !sameRelease(document.release, release) || !VERDICTS.includes(document.verdict) || !Array.isArray(document.basis)
+    || (document.ai !== undefined && !validAiWitness(document.ai))) throw new Error("VALIDATOR_EVIDENCE_BINDING_MISMATCH");
+  const derived = verdictFromReport(document.report, document.ai);
   return { document, derived, consistent: derived.verdict === document.verdict && (verdict === undefined || VERDICTS[verdict] === document.verdict) };
 }
