@@ -27,13 +27,15 @@ MCP 서버 목록 사이트에는 비슷한 이름의 스캐너가 여럿 있습
 - 검증자 표의 `evidenceHash`는 [증거 파일](benchmarks/results/base-sepolia-v3-demo-2026-10-26/) 각각의 sha256과 같습니다. 10건은 검증자 키 3개를 쥔 시연 스크립트([`base-sepolia-v3-demo.ts`](scripts/demo/base-sepolia-v3-demo.ts))가 만들었고, 표 6건은 운영사 중계 계정이 제출했습니다(검증자 주소는 서명에서 복원되어 `VoteRecorded`에 남음).
 - 승인은 24시간 유효입니다. 1.0.0은 2026-10-27부터 만료(EXPIRED)로 읽히고 발표 전에 다시 검사해 승인합니다. 폐기된 1.0.1은 영구히 REVOKED입니다.
 - gas: 승인 1건(등록 + PASS 2표) 584,401 · 격리까지 간 폐기 1건(등록 + 격리 + FAIL 2표) 724,456 · 10건 합계 1,654,596 (0.006 gwei).
+- 소스 검증: 세 컨트랙트(ValidatorRegistry · PolicyRegistry · ReleaseRegistryV3)는 Sourcify에서 생성·실행 바이트코드 모두 exact match입니다(배포 커밋 `b97abc4`, solc 0.8.36, optimizer 200, viaIR, shanghai, 2026-11-02 검증). [Sourcify](https://repo.sourcify.dev/84532/0xa3F067039A119a06E8ec924b429936a0C7cEF604) · [Blockscout](https://base-sepolia.blockscout.com/address/0xa3F067039A119a06E8ec924b429936a0C7cEF604?tab=contract)
 
-**Base Sepolia 리허설 (2026-11-02, 버리는 배포).** 최종 시연 구성을 새 배포에서 처음부터 끝까지 다시 돌렸습니다: A사 검증자 GPT-6.1 Terra 증인, B사 규칙과 시험 환경만, C사 Gemini 3.5 Flash 증인과 긴급 격리. [기록](benchmarks/results/base-sepolia-v3-rehearsal-2026-11-02/README.md)
+**Base Sepolia 리허설 (2026-11-02 새벽, 버리는 배포).** 당시의 시연 구성을 새 배포에서 처음부터 끝까지 다시 돌렸습니다: A사 검증자 GPT-6.1 Terra 증인, B사 규칙과 시험 환경만, C사 Gemini 3.5 Flash 증인과 긴급 격리. 같은 날 최종 시연 구성은 A사 증인을 GPT-6 Luna로 바꿨고, 그 구성은 로컬 Ganache에서 승인·폐기 흐름을 다시 확인했습니다. 아래 Gateway 결과는 AI 증인과 무관합니다. [기록](benchmarks/results/base-sepolia-v3-rehearsal-2026-11-02/README.md)
 - 1.0.0은 세 곳 PASS로 VERIFIED, 1.0.1은 C사 긴급 격리 뒤 세 곳 FAIL로 REVOKED. 거래 13건, 수수료 0.00003 ETH. 표 6건의 `evidenceHash`는 증거 파일 sha256과 같습니다.
 - 두 회사 Gateway 장면(`npm run demo:gateways`, 공개 RPC, 표본 20): 호출마다 판정을 다시 받아도 p50 A사 1,098 ms · B사 1,092 ms. 운영사 연결을 끊으면 A사는 멈추고 B사는 계속 씁니다. 1.0.1은 두 회사 모두 프로세스를 띄우기 전에 거부했습니다.
 
-**고정 40개 평가 (정상 20 · 공격 20, 5개 비교군).** 정답은 작성자 라벨이며 2인 검토 중입니다.
+**고정 40개 평가 (정상 20 · 공격 20, 5개 비교군).** 정답은 작성자 라벨이며 2인 검토는 대기 중입니다([`review-sheet.csv`](benchmarks/eval40/review-sheet.csv)).
 - 로컬 모델 2종 × 3회: [`eval40-2026-10-26`](benchmarks/results/eval40-2026-10-26/summary.md) · Gemini 3.5 Flash-Lite × 3회: [`eval40-gemini-3.5-flash-lite-2026-10-27`](benchmarks/results/eval40-gemini-3.5-flash-lite-2026-10-27/summary.md) · Gemini 2.5 Flash · 3.5 Flash × 1회: [`eval40-gemini-2026-10-26`](benchmarks/results/eval40-gemini-2026-10-26/summary.md) · GPT-6.1 Terra · GPT-6 Luna × 3회: [`eval40-openai-2026-11-02`](benchmarks/results/eval40-openai-2026-11-02/summary.md)
+- 검증자 세 곳의 2-of-3 판정(기록된 판정으로 계산, `node benchmarks/eval40/two-of-three.mjs`): [`two-of-three.md`](benchmarks/results/eval40-openai-2026-11-02/two-of-three.md). 최종 시연 구성(A사 GPT-6 Luna · B사 규칙과 시험 환경만 · C사 Gemini 3.5 Flash)이면 규칙이 놓친 공격 27회 중 21회가 보류되고, AI 증인이 한 곳뿐이면 0회입니다. AI 때문에 보류된 정상은 어느 구성에도 없습니다.
 - MCPTox(외부 485건, 정적 문구 규칙만): [`mcptox-static-2026-09-09.json`](benchmarks/results/mcptox-static-2026-09-09.json)
 
 **직접 돌려 보기.** Docker 없이 V3 전체 흐름(운영사 API · 인덱서 · 검증자 3곳 · 대시보드): `npm run demo:v3`, 자동 확인은 `npm run demo:v3-smoke`. 두 회사 Gateway 장면은 `npm run demo:v3 -- --seed --data <폴더>`를 띄운 뒤 `npm run demo:gateways -- --stack <폴더>` ([`scripts/demo/README.md`](scripts/demo/README.md)). 검증자에 AI 증인을 붙이는 방법은 [`apps/validator/README.md`](apps/validator/README.md)의 AI witness 절을 보세요.
@@ -67,8 +69,8 @@ MCP 서버 목록 사이트에는 비슷한 이름의 스캐너가 여럿 있습
 | 레거시 유지 | `docker compose` 경로 | Compose는 V1 레지스트리 + 레거시 무서명 admission이며 CI 회귀 테스트로만 씁니다. 최종 시연 경로는 Docker 없는 V3 스택(`npm run demo:v3`)입니다. |
 | 완료 | Base Sepolia에 ReleaseRegistryV3 배포, 승인·긴급 격리·폐기 거래 10건(위 증거 모음) | 검증자 3곳과 관리자 키는 팀이 운영합니다(`SINGLE_INSTITUTION_DEMO`). |
 | 완료 | 운영사 API·인덱서·검증자 중계·대시보드의 V3 전환(`CONTROL_V3_REGISTRY_ADDRESS`) | 로컬 Ganache로 자동 테스트합니다(`tests/api/v3-fullcycle.test.ts`, `tests/integration/v3-local-stack.test.ts`). |
-| 완료 | V3 검증자의 AI 증인(검증자별 모델 설정, 무응답이면 보류) | AI 의심과 AI 무응답은 보류(ABSTAIN)만 만들고, FAIL·긴급 격리는 결정론적 증거로만 납니다(ADR-002). |
-| 완료 | 실제 AI 모델 호출: 고정 40개 표본 × 모델 7종(로컬 2 · Gemini 3 · OpenAI 2) | Gemini 3.5 Flash(표본당 1회)는 규칙이 놓친 공격 9개 중 8개에 보류 표를 냈고, 규칙 통과 정상 18개 중 응답한 17개에서 오탐 1개, 형식 실패 0이었습니다. 나머지 1개(HTTP 502 무응답)는 새 규칙에서 보류가 됩니다. 3회 반복에서 규칙이 놓친 공격 27회 중 의심은 GPT-6 Luna 21회, GPT-6.1 Terra 12회였고, 규칙 통과 정상에서 오탐은 두 모델 모두 0이었습니다. 로컬 소형 모델은 형식·인용 실패 148/240회, Flash-Lite는 42/120회. 결과는 그대로 보고합니다. |
+| 완료 | V3 검증자의 AI 증인(검증자별 모델 설정, 무응답이면 보류) | AI 의심과 AI 무응답은 보류(ABSTAIN)만 만들고, FAIL·긴급 격리는 결정론적 증거로만 납니다(ADR-002). 최종 시연은 A사 GPT-6 Luna, C사 Gemini 3.5 Flash, B사 규칙과 시험 환경만 씁니다. |
+| 완료 | 실제 AI 모델 호출: 고정 40개 표본 × 모델 7종(로컬 2 · Gemini 3 · OpenAI 2) | Gemini 3.5 Flash(표본당 1회)는 규칙이 놓친 공격 9개 중 8개에 보류 표를 냈고, 규칙 통과 정상 18개 중 응답한 17개에서 오탐 1개, 형식 실패 0이었습니다. 나머지 1개(HTTP 502 무응답)는 새 규칙에서 보류가 됩니다. 3회 반복에서 규칙이 놓친 공격 27회 중 의심은 GPT-6 Luna 21회, GPT-6.1 Terra 12회였고, 규칙 통과 정상에서 오탐은 두 모델 모두 0이었습니다(Terra 54회 모두 응답, Luna는 응답한 53회 기준). Luna는 120회 중 2회 형식 오류로 답하지 않았고, 그중 정상 표본 1회(h06)는 새 규칙에서 그 검증자의 보류가 되지만 2-of-3에서는 나머지 두 곳의 PASS로 승인됩니다. 로컬 소형 모델은 형식·인용 실패 148/240회, Flash-Lite는 42/120회. 결과는 그대로 보고합니다. |
 
 ### 보장 범위
 
