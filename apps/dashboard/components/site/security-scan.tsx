@@ -65,13 +65,13 @@ export function SecurityScan({ initialVersion }: { initialVersion: FixtureVersio
       <header className="ws-topbar"><div className="ws-breadcrumb"><span>MCPShield</span><b>/</b> 보안 검사</div><div><LanguageSwitcher /></div></header>
       <div className="ws-content">
         <div className="ws-heading"><div><p>SECURITY WORKSPACE</p><h1>보안 검사</h1><span>정확한 릴리스를 체인에 등록하고 검증 라운드를 엽니다. 판정은 검증자 A·B·C가 각자 내립니다.</span></div>
-          <div className="ws-session" data-raw><i className={signedIn ? '' : 'off'} /> {signedIn ? <>운영 API <b>{session.session.tenantId} · {session.session.role}</b></> : '로그인 필요'}</div></div>
+          <div className="ws-session" data-raw><i className={signedIn ? '' : 'off'} /> {signedIn ? <>운영 API · <b>{session.session.tenantId} · {session.session.role}</b></> : '로그인 필요'}</div></div>
         {session.status === 'error' && <p className="scan-error v3-banner" role="alert">{session.message}</p>}
         {boardError && <p className="scan-error v3-banner" role="alert">{boardError}</p>}
 
         <section className="scan-layout">
           <div className="scan-form panel">
-            <div className="panel-head"><div><span className="panel-index">01</span><h2>검사 대상</h2><p>검토된 고정 fixture 2개(mail-mcp 1.0.0 · 1.0.1)만 검사할 수 있습니다.</p></div><span className="draft" data-raw>{status ?? '미등록'}</span></div>
+            <div className="panel-head"><div><span className="panel-index">01</span><h2>검사 대상</h2><p>검토된 고정 fixture 2개(mail-mcp 1.0.0 · 1.0.1)만 검사할 수 있습니다.</p></div><span className="draft" data-raw>{!signedIn || !board ? '—' : status ?? '미등록'}</span></div>
             <div className="form-grid">
               <label><span>MCP TOOL NAME</span><input value="mail-mcp" readOnly /></label>
               <label><span>VERSION</span><select value={version} onChange={(event) => { setVersion(event.target.value as FixtureVersion); setError('') }} disabled={busy}><option value="1.0.0">1.0.0</option><option value="1.0.1">1.0.1</option></select></label>
@@ -89,7 +89,7 @@ export function SecurityScan({ initialVersion }: { initialVersion: FixtureVersio
           </div>
 
           <div className="scan-progress panel">
-            <div className="panel-head"><div><span className="panel-index">02</span><h2>검증 흐름</h2></div><span className="complete" data-raw>{round ? outcomeKo(round.outcome) : '기록 없음'}</span></div>
+            <div className="panel-head"><div><span className="panel-index">02</span><h2>검증 흐름</h2></div><span className="complete" data-raw>{!signedIn || !board ? '—' : round ? outcomeKo(round.outcome) : '기록 없음'}</span></div>
             {!signedIn ? loginNote : !board ? <p className="v3-empty">체인 기록을 불러오는 중입니다.</p> : round ? <V3FlowMap flow={flow} compact /> : <p className="v3-empty">이 버전의 투표 라운드가 아직 없습니다.</p>}
           </div>
 

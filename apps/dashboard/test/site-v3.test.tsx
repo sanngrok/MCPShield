@@ -169,6 +169,9 @@ test("progress phases follow the data: operator, validators, decided, done, term
   assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: VOTES100, round: APPROVED, admission: allow, admissionPending: true, now: NOW }), "decided");
   assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: VOTES100, round: APPROVED, admission: allow, now: NOW }), "done");
   assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: VOTES100, round: twoOfThree, admission: allow, now: NOW + 60_000 }), "done", "the third vote is not waited for forever");
+  const unindexed = round(SCAN100, "APPROVED", [cast(A, "PASS", "a"), cast(B, "PASS", "b", { afterDecision: null, txHash: null }), cast(C, "PASS", "c")], 5_000);
+  assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: VOTES100, round: unindexed, admission: allow, now: NOW }), "decided", "a cast vote the indexer has not seen yet");
+  assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: VOTES100, round: unindexed, admission: allow, now: NOW + 60_000 }), "done");
   assert.equal(progressPhase({ scanId: SCAN101, scan: scan(SCAN101, R101, "COMPLETED", "FAIL"), votes: VOTES101, now: NOW }), "terminal");
   assert.equal(progressPhase({ scanId: SCAN100, scan: scan(SCAN100, R100, "COMPLETED", "ABSTAIN", new Date(NOW - 200_000).toISOString()), votes: votesOf(R100, []), now: NOW }), "stalled");
 });

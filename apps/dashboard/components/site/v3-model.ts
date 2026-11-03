@@ -247,9 +247,10 @@ export function progressPhase({ scanId, signedOut = false, notFound = false, sca
     return "validators";
   }
   if (round.outcome === "OPEN" || !DECIDED.has(round.outcome)) return "validators";
-  const cast = round.votes.filter((vote) => vote.cast).length;
+  // Wait (at most 45 s after the decision) for the remaining votes and for the indexer to see every cast vote's transaction.
+  const settledVotes = round.votes.filter((vote) => vote.cast).length >= 3 && round.votes.every((vote) => !vote.cast || Boolean(vote.txHash));
   const sinceDecision = round.decidedAt ? now - round.decidedAt * 1000 : 0;
-  if ((cast < 3 && sinceDecision < 45_000) || !admission || admissionPending) return "decided";
+  if ((!settledVotes && sinceDecision < 45_000) || !admission || admissionPending) return "decided";
   return "done";
 }
 

@@ -171,7 +171,7 @@ export function useV3Run(target: { scanId?: string | null; releaseId?: string | 
         if (poll) {
           if (phase === "done" || phase === "terminal" || phase === "error") return;
           timer = setTimeout(tick, phase === "stalled" ? 5000 : 1500);
-        } else if (round?.outcome === "OPEN" || admissionPending || (round && round.votes.some((vote) => !vote.cast) && phase === "decided")) timer = setTimeout(tick, 3000);
+        } else if (round?.outcome === "OPEN" || phase === "decided") timer = setTimeout(tick, 3000); // late votes, indexer lag or an admission recheck
       } catch (failure) {
         if (signal.aborted) return;
         const status = statusOf(failure);
