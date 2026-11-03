@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // The dev-server "N" badge sits on the workspace sidebar in demo recordings.
+  devIndicators: false,
   // The Figma-design workspace replaced the Control Room and Judge Lab pages; keep their old links working.
   async redirects() {
     return [

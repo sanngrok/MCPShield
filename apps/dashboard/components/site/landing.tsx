@@ -2,11 +2,13 @@
 
 import { useRef, useState } from 'react'
 
+const REPOSITORY = 'https://github.com/sihoon-0077/MCPShield'
+
 const nav = [
-  ['소개', '#why'],
-  ['주요 기능', '#product'],
-  ['작동 방식', '#how'],
-  ['보안 체험', '#product'],
+  ['보안 검사', '/security-scan'],
+  ['검사 기록', '/history'],
+  ['운영 콘솔', '/console'],
+  ['GitHub', REPOSITORY],
 ]
 
 const Logo = () => (
@@ -26,9 +28,9 @@ function Header() {
     <div className="nav-shell">
       <Logo />
       <nav className={open ? 'nav-links open' : 'nav-links'} aria-label="주요 메뉴">
-        {nav.map(([label, href]) => <a key={label} href={href} onClick={() => setOpen(false)}>{label}</a>)}
+        {nav.map(([label, href]) => <a key={label} href={href} onClick={() => setOpen(false)} {...(href.startsWith('https://') ? { target: '_blank', rel: 'noreferrer' } : {})}>{label}</a>)}
       </nav>
-      <a className="nav-cta" href="/security-scan">무료 체험하기 <span>↗</span></a>
+      <a className="nav-cta" href="/security-scan">보안 검사 시작 <span>↗</span></a>
       <button className="menu" aria-label="메뉴 열기" aria-expanded={open} onClick={() => setOpen(!open)}><i /><i /></button>
     </div>
   </header>
@@ -54,10 +56,10 @@ function Hero() {
   return <main id="top" className="hero shell">
     <OpticalField />
     <div className="hero-copy">
-      <p className="eyebrow">INTELLIGENCE BEFORE EXECUTION</p>
+      <p className="eyebrow">VERIFY BEFORE EXECUTION</p>
       <h1>AI가 실행하기 전에,<br /><em>위험을 발견하다.</em></h1>
       <p className="hero-lede">AI가 사용하는 외부 도구의 위험을 검증하고,<br />안전한 실행을 위한 기준을 만듭니다.</p>
-      <div className="actions"><ButtonLink href="/security-scan">보안 체험 시작하기 <span>↗</span></ButtonLink><ButtonLink secondary href="#why">MCPShield 알아보기</ButtonLink></div>
+      <div className="actions"><ButtonLink href="/security-scan">보안 검사 시작하기 <span>↗</span></ButtonLink><a href={REPOSITORY} className="button button-secondary" target="_blank" rel="noreferrer">GitHub에서 코드 보기</a></div>
     </div>
   </main>
 }
@@ -65,9 +67,9 @@ function Hero() {
 function Footer() {
   return <footer className="footer shell">
     <div><Logo /><p>Verify first. Execute safely.</p></div>
-    <div className="footer-links"><span>PRODUCT</span><a href="#top">소개</a><a href="#top">보안 체험</a><a href="#top">작동 방식</a></div>
-    <div className="footer-links"><span>CONNECT</span><a href="#top">GitHub ↗</a><a href="mailto:hello@mcpshield.ai">Contact</a></div>
-    <small>© 2025 MCPShield. All rights reserved.</small>
+    <div className="footer-links"><span>PRODUCT</span><a href="/security-scan">보안 검사</a><a href="/history">검사 기록</a><a href="/console">운영 콘솔</a></div>
+    <div className="footer-links"><span>CONNECT</span><a href={REPOSITORY} target="_blank" rel="noreferrer">GitHub ↗</a></div>
+    <small>© 2026 MCPShield.</small>
   </footer>
 }
 

@@ -10,7 +10,7 @@ export default function Page() {
     <div className="workspace">
       <Sidebar active="Settings" />
       <div className="ws-main">
-        <header className="ws-topbar"><div className="ws-breadcrumb"><span>MCPShield</span><b>/</b> Settings <b>/</b> 운영 콘솔</div><LanguageSwitcher /></header>
+        <header className="ws-topbar"><div className="ws-breadcrumb"><span>MCPShield</span><b>/</b> 운영 콘솔</div><LanguageSwitcher /></header>
         <div className="ws-content" data-raw><OperationsConsole /></div>
       </div>
     </div>
