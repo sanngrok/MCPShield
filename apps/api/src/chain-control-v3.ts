@@ -22,6 +22,9 @@ const checkedEvidence = (file: unknown, expected: Parameters<typeof checkedVoteE
 };
 const findingSummary = (report: any) => (Array.isArray(report?.findings) ? report.findings : []).slice(0, 32)
   .map((f: any) => ({ code: String(f.code), severity: String(f.severity), stage: String(f.stage), deterministic: f.deterministic === true }));
+/** The validator's own AI witness as written in its signed evidence: which model and whether it answered. Nothing else
+ *  (no provider error text) leaves the API. A vote whose evidence has no `ai` had no witness configured. */
+const aiSummary = (ai: any) => ai ? { model: typeof ai.model === "string" ? ai.model : null, status: ai.status === "COMPLETED" ? "COMPLETED" : "UNAVAILABLE" } : null;
 
 type SignedAction = (tenantId: string, kind: "ATTEST" | "QUARANTINE", payload: any, scan: any, incoming: unknown) => Promise<any>;
 
@@ -83,7 +86,7 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
     const record = { roundId: a.roundId, scanId: a.scan.scanId, releaseId: a.round.releaseId, policyHash: a.round.policyHash, validator, verdict: VERDICTS[verdict], evidenceHash,
       operatorVerdict: a.operatorVerdict, agreesWithOperator: a.operatorVerdict === VERDICTS[verdict], receivedAt: new Date().toISOString(),
       evidence: checked ? { consistent: checked.consistent, derivedVerdict: checked.derived.verdict, basis: checked.document.basis,
-        findings: findingSummary(checked.document.report), file: body.evidence } : null };
+        findings: findingSummary(checked.document.report), ai: aiSummary(checked.document.ai), file: body.evidence } : null };
     await store.put(user.tenantId, "validator-vote", `${a.roundId}:${validator.toLowerCase()}`, record, true);
     await store.event(user.tenantId, a.round.releaseId, "validator.vote.received", { scanId: a.scan.scanId, validator, roundId: a.roundId, verdict: record.verdict,
       evidenceHash, agreesWithOperator: record.agreesWithOperator, evidenceConsistent: checked?.consistent ?? null });

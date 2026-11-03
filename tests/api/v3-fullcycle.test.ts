@@ -140,7 +140,7 @@ test("V3 operator relay: validators vote from their own scans and evidence, diss
     const identity = { releaseId: cTemplate.payload.releaseId, artifactDigest: cTemplate.payload.artifactDigest, manifestDigest: cTemplate.payload.manifestDigest,
       toolSurfaceDigest: cTemplate.payload.toolSurfaceDigest };
     const dissent = evidenceDocument(C, identity, { scanStatus: "PASSED", findings: [{ code: "SEMANTIC_BEHAVIOR_MISMATCH", severity: "HIGH", stage: "AI", deterministic: false }] },
-      { verdict: "ABSTAIN", basis: ["SEMANTIC_BEHAVIOR_MISMATCH"] });
+      { verdict: "ABSTAIN", basis: ["SEMANTIC_BEHAVIOR_MISMATCH"] }, { required: true, provider: "openai", model: "synthetic-witness", status: "COMPLETED" });
     const sign = (payload: any) => new Wallet(keyC).signTypedData(cTemplate.domain, attestationV3Types, payload);
     const abstain = { ...cTemplate.payload, evidenceHash: dissent.evidenceHash, verdict: 2 };
     await refused("/v1/validator/attestations", { scanId: safe.scan.scanId, payload: abstain, signature: await sign(abstain), evidence: `${dissent.file} ` }, "VALIDATOR_EVIDENCE_HASH_MISMATCH");
@@ -158,6 +158,8 @@ test("V3 operator relay: validators vote from their own scans and evidence, diss
     assert.equal(safeVotes[A].verdict, "PASS"); assert.equal(safeVotes[A].agreesWithOperator, true); assert.equal(safeVotes[A].evidence.consistent, true);
     assert.equal(safeVotes[C].verdict, "ABSTAIN"); assert.equal(safeVotes[C].agreesWithOperator, false);
     assert.deepEqual(safeVotes[C].evidence.basis, ["SEMANTIC_BEHAVIOR_MISMATCH"]); assert.equal(safeVotes[C].evidence.consistent, true);
+    assert.deepEqual(safeVotes[C].evidence.ai, { model: "synthetic-witness", status: "COMPLETED" }, "the validator's own AI witness, from its signed evidence");
+    assert.equal(safeVotes[A].evidence.ai, null, "no witness configured is reported as none, never as an AI approval");
     const served = await call("GET", `/v1/releases/${safe.release.releaseId}/votes/${safeRound.roundId}/${C}/evidence`);
     assert.equal(`0x${createHash("sha256").update(served.body).digest("hex")}`, dissent.evidenceHash, "the exact evidence bytes are served for re-hashing");
 
