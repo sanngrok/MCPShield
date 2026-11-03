@@ -60,7 +60,7 @@ function Report({ scanId, releaseId }: { scanId: string | null; releaseId: strin
       <LanguageSwitcher /></div></header>
     <div className="ws-content results-content">
       <div className="ws-heading"><div><p>INVESTIGATION REPORT</p><h1>검사 결과</h1><span data-raw>{release!.legacyReleaseId} · {chainLabel(flow.chainId)} · 라운드 {short(round?.roundId)}</span></div>
-        <div className="ws-session" data-raw><i /> <b>{round ? outcomeName[round.outcome] ?? round.outcome : '라운드 없음'}</b></div></div>
+        <div className="ws-session" data-raw><i className={round?.outcome === 'APPROVED' ? '' : round?.outcome === 'REJECTED' ? 'fail' : 'review'} /> <b>{round ? outcomeName[round.outcome] ?? round.outcome : '라운드 없음'}</b></div></div>
       {!decided && <p className="v3-banner" data-raw>{round ? '아직 결론이 나지 않았습니다.' : '이 검사의 투표 라운드가 아직 없습니다.'} {scan && <Link href={`/scan-progress?scan=${scan.scanId}`}>진행 화면 보기 ↗</Link>}</p>}
 
       <VerdictCards votes={votes} release={release} admission={admission} round={round} loading={run.loading} />

@@ -38,7 +38,7 @@ export function ScanProgress({ scanId, reused }: { scanId: string | null; reused
     <main className="ws-main">
       <header className="ws-topbar"><div className="ws-breadcrumb"><span>MCPShield</span><b>/</b> 보안 검사 <b>/</b> 검증 진행</div><div className="ws-topbar-actions"><Link className="ws-button quiet" href="/security-scan"><Icon name="arrow" /> 검사 화면으로 돌아가기</Link><LanguageSwitcher /></div></header>
       <div className="ws-content progress-content">
-        <div className="progress-heading"><div><div className="live-label"><i /> V3 검증 진행 <span>운영 API · 1.5초마다 조회</span></div><h1>{finished ? '검증이 끝났습니다.' : '검증을 진행하고 있습니다.'}</h1><p>운영사는 등록과 라운드 공지만 합니다. 검증자 3곳이 각자 다시 검사하고 직접 서명한 표를 운영사가 그대로 중계합니다.</p></div>
+        <div className="progress-heading"><div><div className="live-label"><i /> V3 검증 진행 <span>운영 API · 1.5초마다 조회</span></div><h1>{finished ? '검증이 끝났습니다.' : phase === 'error' ? '검증 기록을 확인할 수 없습니다.' : phase === 'none' ? '진행 중인 검사가 없습니다.' : phase === 'login' ? '운영자 로그인이 필요합니다.' : '검증을 진행하고 있습니다.'}</h1><p>운영사는 등록과 라운드 공지만 합니다. 검증자 3곳이 각자 다시 검사하고 직접 서명한 표를 운영사가 그대로 중계합니다.</p></div>
           <div className="scan-meta" data-raw><span><small>MCP 도구</small><b>mail-mcp</b></span><span><small>버전</small><b>{release?.version ?? '—'}</b></span><span><small>검사 ID</small><b>{scanId ? scanId.slice(0, 8) : '—'}</b></span><span><small>상태</small><b className={phaseTone[phase] ?? ''} data-phase={phase}>{phaseLabel[phase]}</b></span></div></div>
 
         <section className={`pipeline-panel panel ${phase === 'error' ? 'has-failed' : ''}`} data-raw>

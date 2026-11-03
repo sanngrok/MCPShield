@@ -212,6 +212,7 @@ a.view-raw,a.result-link{display:flex;align-items:center;justify-content:space-b
 .v3-open{color:#c6ff2e;font-size:20px;line-height:1;text-align:center}
 .risk-block strong.review{color:#d4ae5f}
 .ws-session i.off,.ws-environment>i.off,.ws-system span i.off{background:#59605a;box-shadow:none}
+.ws-session i.fail{background:#ff5a5a}.ws-session i.review{background:#d4ae5f}
 .ws-system small a{color:#c6ff2e}
 .map-legend .nil{background:transparent;border:1px solid #6b736c}
 .v3-map-panel{margin-bottom:12px}
