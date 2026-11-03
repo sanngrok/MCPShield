@@ -226,3 +226,12 @@ a.view-raw,a.result-link{display:flex;align-items:center;justify-content:space-b
 .v3-release-card{display:flex;flex-direction:column}.v3-release-card .v3-flow-wrap{flex:1}
 .v3-card-foot{margin:0;padding:12px 19px 16px;border-top:1px solid #242925;font-size:13px;color:#a0a7a1}
 @media(max-width:1100px){.v3-release-grid{grid-template-columns:1fr}}
+/* The sticky sidebar is one viewport tall; keep its column colour below it on long pages and full-page captures. */
+@media(min-width:1101px){.workspace{background:linear-gradient(90deg,#0b0e0c 0 227px,#232824 227px 228px,#090b0a 228px)}}
+/* 11/7 발표 캡처: 작업 화면 글자는 12px 이상 (13장 Playwright 검사와 짝) */
+.workspace small,.workspace .ws-sidebar nav small,.workspace .metric-card>small,.workspace .metric-card strong i,.workspace .severity,
+.workspace .danger-tag,.workspace .tool-name i,.workspace .risk-block span i,.workspace .recent-head button,.workspace .stage-count span,
+.workspace .live-panel-head>span,.workspace .language-switcher button,.workspace .table-labels,.workspace .live-label span,.workspace .map-legend,.workspace .map-legend>b,
+.workspace .ops :is(th,td small,.ops-badge,.ops-flow span,.ops-stats span){font-size:12px}
+.workspace .ws-session{font-size:12px!important;color:#8e968f!important}
+body,.workspace{font-family:'Sora','IBM Plex Sans KR','Malgun Gothic','Apple SD Gothic Neo',sans-serif}
