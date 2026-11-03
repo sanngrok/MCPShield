@@ -94,7 +94,9 @@ const pairs: [string, string][] = [
 
 const enToKo = new Map(pairs)
 const koToEn = new Map(pairs.map(([en, ko]) => [ko, en]))
+// Panel eyebrows stay English in both languages (each sits above a Korean title); the server renders them as they are shown.
 const bilingualTechnicalLabels = new Set([
+  'SECURITY WORKSPACE', 'INVESTIGATION REPORT', 'SCAN ARCHIVE', 'RELEASE REGISTRY', 'RELEASE HISTORY',
   'FINAL VERDICT', 'RISK SCORE', 'ISSUES DETECTED', 'VALIDATOR AGREEMENT',
   'ANALYSIS FLOW', 'BLOCKED',
   'SCAN SUBJECT', 'DETECTED ISSUES', 'TRACE EVIDENCE', 'Evidence & logs',

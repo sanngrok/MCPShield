@@ -92,7 +92,7 @@ export function PreparationConsole({ jobs, releases, policies, operator, onRefre
   }
   return <section className="ops-panel ops-preparations" aria-label="npm · OCI 실행 이미지 준비">
     <div className="ops-section-heading"><h2>npm · OCI 실행 이미지 준비</h2><span className="ops-badge">V2 운영 API · 승인과 별도</span></div>
-    <p>원본 등록 → 고정 이미지 준비 → 별도 릴리스 검사 → 검증자·체인 승인 → Gateway 실행. 기존 공개 체험의 고정 fixture와 분리된 운영 경로입니다.</p>
+    <p>원본 등록 → 고정 이미지 준비 → 별도 릴리스 검사 → 검증자·체인 승인 → Gateway 실행.</p>
     {operator && <form method="post" className="ops-inline-form" onSubmit={prepare}><label>준비할 원본<select name="sourceId" value={sourceId} onChange={event => { setSourceId(event.target.value); setPolicyHash(""); setBaseline(""); }} required disabled={busy}><option value="">npm / tarball / OCI 원본 선택</option>{releases.filter(canPrepare).map(release => <option key={release.releaseId} value={release.releaseId}>{release.sourceType} · {release.legacyReleaseId || release.toolId} · {short(release.releaseId)}</option>)}</select></label>
       <label>원본 유형에 맞는 준비 정책<select name="policyHash" value={policyHash} onChange={event => { setPolicyHash(event.target.value); setBaseline(""); }} required disabled={busy || !source}><option value="">{source ? "호환 정책 선택" : "원본을 먼저 선택하세요"}</option>{matchingPolicies.map(policy => <option key={policy.policyHash} value={policy.policyHash}>{policy.alias} · {policy.version}{scopedNodePolicyMode(policy.document) ? ` · ${semanticModeLabel(scopedNodePolicyMode(policy.document))}` : source?.sourceType === "oci" ? " · LOCAL_CONTRACT_TEST" : ""}</option>)}</select></label>
       {requiresBaseline && <BaselineSelect candidates={baselines} value={baseline} disabled={busy} onChange={setBaseline} />}

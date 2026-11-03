@@ -95,6 +95,9 @@ async function handle(request: NextRequest, context: Context) {
     const value = request.nextUrl.searchParams.get(key);
     if (value && value.length <= 512) url.searchParams.set(key, value);
   }
+  // The vote view of a release under one exact policy (the site shows the policy it scans with); only a bytes32 hash passes.
+  const policyHash = request.nextUrl.searchParams.get("policyHash");
+  if (/^releases\/[^/]+\/votes$/.test(route) && policyHash && /^0x[0-9a-f]{64}$/.test(policyHash)) url.searchParams.set("policyHash", policyHash);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   try {

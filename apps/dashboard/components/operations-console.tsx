@@ -105,7 +105,7 @@ export function OperationsConsole() {
     <div className={error ? "ops-message error" : "ops-message"} role={error ? "alert" : "status"}>{error || notice}</div>
     {!session ? <section className="ops-panel ops-login"><h2>조직에 연결</h2><p>관리자가 발급한 운영 액세스 토큰을 입력하세요. 계정에 지정된 조직과 역할만 접근할 수 있습니다.</p><form method="post" onSubmit={(event) => submit(event, async (data) => { const current = await api<Session>("session", { token: field(data, "token") }); setSession(current); await refresh(); })}><label>액세스 토큰<input name="token" type="password" required minLength={16} maxLength={2048} autoComplete="off" /></label><button disabled={busy}>운영 콘솔 연결</button></form><small>토큰은 JavaScript에서 읽을 수 없는 HttpOnly 쿠키로 보관하며, 주소나 localStorage에 기록하지 않습니다.</small></section> : <>
       <div className="ops-session"><span><b>{session.tenantId}</b> · {session.role}</span><span>실제 API · 체인 증빙은 릴리스별 표시</span><button disabled={busy} onClick={() => void action(refresh)}>새로고침</button></div>
-      <p className="ops-data-note" role="status">{streamState}. 변경 알림은 상태·승인 증거가 아니며 공개 체험 데이터와 섞이지 않습니다.</p>
+      <p className="ops-data-note" role="status">{streamState}. 변경 알림은 상태·승인 증거가 아닙니다.</p>
       <HealthPanel key={`health:${session.tenantId}:${session.role}`} refreshVersion={healthRefresh} />
       <section className="ops-stats" aria-label="현재 조직 운영 현황"><article><span>등록 릴리스</span><strong>{releases.length}</strong></article><article><span>검사 대기 / 실행</span><strong>{operations ? (operations.counts.QUEUED ?? 0) + (operations.counts.RUNNING ?? 0) : "—"}</strong></article><article><span>재처리 필요</span><strong>{operations?.counts.DEAD_LETTER ?? "—"}</strong></article><article><span>격리 / 폐기</span><strong>{releases.filter((item) => ["QUARANTINED", "REVOKED"].includes(item.status)).length}</strong></article></section>
       {operations && <p className="ops-data-note">{operations.driver} 연결 · 조직 전체 검사 {operations.total}개 · 목록은 최근 최대 250개 · 릴리스·폐기 개수는 불러온 목록 기준</p>}
@@ -120,6 +120,6 @@ export function OperationsConsole() {
       <ReceiptConsole key={`receipt:${session.tenantId}:${session.role}`} manage={session.capabilities.manage} evidenceAccess={session.capabilities.evidence} />
       {detail !== null && <section id="ops-evidence" className="ops-panel"><div className="ops-section-heading"><h2>작업·증거 상세</h2><button onClick={() => setDetail(null)}>닫기</button></div><p>증거 조회 권한은 API에서 확인하며 접근 기록을 남깁니다.</p><EvidenceView evidence={detail} /></section>}
     </>}
-    <footer className="ops-footer"><b>MCPShield</b><span>공개 체험 데이터와 조직 운영 데이터는 별도로 관리됩니다.</span><a href="/mcp#connect">MCP 연결 안내</a></footer>
+    <footer className="ops-footer"><b>MCPShield</b><span>이 조직의 운영 API 기록만 표시합니다.</span></footer>
   </main>;
 }

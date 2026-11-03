@@ -91,7 +91,7 @@ export default async function LedgerPage() {
       <header className="ledger-hero">
         <p className="eyebrow">MCPShield · ReleaseRegistryV3 · Base Sepolia</p>
         <h1>운영사를 거치지 않고, 체인만 읽은 화면입니다.</h1>
-        <p className="muted">검증자 3곳은 각자 검사하고 자기 증거 해시에 서명합니다. 셋 중 둘이 같은 판정을 내면 체인 상태가 바뀌고, 반대표도 지워지지 않습니다.
+        <p className="muted">검증자 A·B·C(팀이 운영하는 역할 이름)는 각자 검사하고 자기 증거 해시에 서명합니다. 셋 중 둘이 같은 판정을 내면 체인 상태가 바뀌고, 반대표도 지워지지 않습니다.
           거래 목록은 위치만 알려 줄 뿐이고, 모든 내용은 체인에서 다시 읽은 영수증과 컨트랙트 상태입니다.</p>
         {data && <p className="muted small">레지스트리 {data.config.explorer
           ? <a className="mono" href={`${data.config.explorer}/address/${data.config.registry}`} target="_blank" rel="noreferrer">{short(data.config.registry, 12)}</a>

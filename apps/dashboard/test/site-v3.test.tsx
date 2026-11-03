@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextRequest } from "next/server";
+import { GET } from "../app/api/control/[...path]/route";
 import type { Admission, ChainAction, Release, Scan, V3Round, V3Vote, V3Votes } from "../components/release-workflow";
-import { chainLabel, consensusCard, flowView, groundsCard, laneOf, progressPhase, severityCard, shownRound, txHref, verdictCard, witnessText, type HistoryItem } from "../components/site/v3-model";
-import { RunsTable, V3FlowMap, VerdictCards } from "../components/site/v3-views";
-import { startScan, type Policy } from "../components/site/v3-api";
+import { LANE_ROLE, chainLabel, chainState, consensusCard, eventText, findingsOf, flowView, groundsCard, laneOf, progressPhase, runHistory, severityCard, shownRound, txHref, verdictCard, when, witnessText, type HistoryItem } from "../components/site/v3-model";
+import { FindingsPanel, RunsTable, V3FlowMap, VerdictCards } from "../components/site/v3-views";
+import { startScan, votesPath, type Policy } from "../components/site/v3-api";
 
 // Shaped after a seeded local run (demo:v3 --seed): validators in registry order A, B, C; C votes first and holds the emergency brake.
 const A = "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0", B = "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b", C = "0xE11BA2b4D45Eaed5996Cd0823791E0C93114882d";
@@ -85,9 +88,14 @@ function laneOfFlow(r: V3Round, history: HistoryItem[]) {
 }
 
 test("the AI witness is read from the validator's own evidence and is never shown as the one that decides", () => {
-  assert.equal(witnessText(cast(A, "PASS", "a")).label, "AI 증인 미설정");
+  assert.equal(witnessText(cast(A, "PASS", "a")).label, "없음 · 규칙·시험 환경만");
   const answered = witnessText(cast(A, "PASS", "a", {}, { ai: { model: "gpt-6-luna", status: "COMPLETED" } }));
-  assert.equal(answered.model, "gpt-6-luna"); assert.equal(answered.label, "응답함"); assert.equal(answered.tone, "pass");
+  assert.equal(answered.model, "gpt-6-luna"); assert.equal(answered.label, "응답함 · 의심 없음"); assert.equal(answered.tone, "neutral", "an answering witness is never shown in the PASS colour");
+  // A witness whose suspicion held a would-be PASS: amber, with the reason, still no authority.
+  const suspicion = [{ code: "SEMANTIC_BEHAVIOR_MISMATCH", severity: "HIGH", stage: "AI", deterministic: false }];
+  const held = witnessText(cast(A, "ABSTAIN", "a", {}, { basis: ["SEMANTIC_BEHAVIOR_MISMATCH"], findings: suspicion, ai: { model: "gpt-6-luna", status: "COMPLETED" } }));
+  assert.equal(held.label, "응답함 · 의심 1건"); assert.equal(held.tone, "review"); assert.equal(held.note, "AI 의심 → PASS 대신 보류 (판정 권한 없음)");
+  for (const vote of [cast(A, "PASS", "a"), cast(A, "FAIL", "a", {}, { ai: { model: "gpt-6-luna", status: "COMPLETED" } }), none(B)]) assert.notEqual(witnessText(vote).tone, "pass");
   const silent = witnessText(cast(C, "ABSTAIN", "c", {}, { basis: ["AI_UNAVAILABLE"], ai: { model: "gemini-3.5-flash", status: "UNAVAILABLE" } }));
   assert.equal(silent.label, "응답 없음"); assert.equal(silent.note, "PASS 대신 보류 (AI_UNAVAILABLE)"); assert.equal(silent.tone, "review");
   const legacy = cast(A, "PASS", "a"); delete legacy.evidence!.ai;
@@ -97,8 +105,19 @@ test("the AI witness is read from the validator's own evidence and is never show
   const mixed = round(SCAN100, "SPLIT", [cast(A, "PASS", "a", {}, { ai: { model: "gpt-6-luna", status: "COMPLETED" } }), cast(B, "PASS", "b"),
     cast(C, "ABSTAIN", "c", {}, { basis: ["AI_UNAVAILABLE"], ai: { model: "gemini-3.5-flash", status: "UNAVAILABLE" } })]);
   const html = renderToStaticMarkup(<V3FlowMap flow={flowView({ release: R100, votes: votesOf(R100, [mixed], { status: "UNVERIFIED", needsReview: true }), round: mixed })} />);
-  for (const value of ["gpt-6-luna", "응답함", "AI 증인 미설정", "gemini-3.5-flash", "응답 없음", "PASS 대신 보류 (AI_UNAVAILABLE)", "AI는 증인일 뿐입니다"]) assert.ok(text(html).includes(value), value);
+  for (const value of ["gpt-6-luna", "응답함 · 의심 없음", "없음 · 규칙·시험 환경만", "gemini-3.5-flash", "응답 없음", "PASS 대신 보류 (AI_UNAVAILABLE)", "AI는 증인일 뿐입니다", "SINGLE_INSTITUTION_DEMO"]) assert.ok(text(html).includes(value), value);
   assert.doesNotMatch(text(html), /AI가 찾/);
+});
+
+test("a lane's role never claims an AI witness: the witness comes from that vote's own evidence, and the team-run roles are disclosed", () => {
+  for (const role of Object.values(LANE_ROLE)) assert.doesNotMatch(role, /AI/);
+  assert.match(LANE_ROLE.C, /긴급 격리/);
+  const open = round(SCAN100, "OPEN", [none(A), none(B), none(C)], null);
+  for (const compact of [false, true]) {
+    const html = text(renderToStaticMarkup(<V3FlowMap compact={compact} flow={flowView({ release: R100, scan: scan(SCAN100, R100, "COMPLETED"), votes: votesOf(R100, [open]), round: open })} />));
+    assert.doesNotMatch(html, /\+ AI 증인|AI 증인:|gpt|gemini/i, "before any vote nothing says a lane has an AI witness");
+    assert.match(html, /SINGLE_INSTITUTION_DEMO/); assert.match(html, /팀이 운영/);
+  }
 });
 
 test("1.0.0 re-approval: 2-of-3 PASS on chain, the late third vote is kept, and green needs an ALLOW from the API", () => {
@@ -115,7 +134,7 @@ test("1.0.0 re-approval: 2-of-3 PASS on chain, the late third vote is kept, and 
   assert.notEqual(pending.steps[4].state, "done"); assert.equal(pending.gateway, null);
   const consensus = consensusCard(APPROVED);
   assert.equal(consensus.value, "3/3 PASS"); assert.equal(consensus.lines[0], "승인 · 2/3 PASS 달성 · 결론 뒤 1표 기록");
-  assert.equal(severityCard(APPROVED).value, "NONE"); assert.equal(groundsCard(APPROVED).lines[0], "차단 근거 없음");
+  assert.equal(severityCard(APPROVED, VOTES100).value, "없음"); assert.match(severityCard(APPROVED, VOTES100).lines[0], /검증자 A·B·C의 증거 요약 기준/); assert.equal(groundsCard(APPROVED).lines[0], "차단 근거 없음");
   const html = renderToStaticMarkup(<VerdictCards votes={VOTES100} release={R100} admission={admission("ALLOW", "VERIFIED", "RELEASE_VERIFIED")} round={APPROVED} />);
   assert.match(html, /data-final="VERIFIED"/); assert.match(html, /metric-card verdict allowed/); assert.match(text(html), /Gateway ALLOW · RELEASE_VERIFIED/);
 });
@@ -127,15 +146,59 @@ test("1.0.1 revoked: permanent, C's own emergency quarantine, four deterministic
   const flow = flowView({ release: R101, scan: scan(SCAN101, R101, "COMPLETED", "FAIL"), votes: VOTES101, round: REJECTED, actions: [register(R101)], admission: blocked });
   const c = flow.lanes[2];
   assert.equal(c.quarantine?.title, "긴급 격리 실행 · CANARY_EXFILTRATION"); assert.ok(c.quarantine?.lines.includes("폐기가 격리보다 우선"));
-  assert.equal(flow.lanes[0].quarantine, null, "A and B have no quarantine cell");
+  assert.equal(flow.lanes[0].quarantine.title, "격리 안 함", "A and B did not quarantine (their votes are indexed)"); assert.equal(flow.lanes[1].quarantine.title, "격리 안 함");
   assert.equal(flow.steps[3].title, "폐기 · 2/3 FAIL 달성"); assert.equal(flow.gateway, "BLOCK");
   const grounds = groundsCard(REJECTED);
-  assert.equal(grounds.value, "4건"); assert.equal(grounds.lines[0], "의심 신호 1건 · 판정 근거 아님 (로컬 의미 규칙 · AI 모델 아님)");
+  assert.equal(grounds.value, "4건"); assert.deepEqual(grounds.lines, ["의심 신호 1건 · 승인·폐기 근거 아님", "로컬 의미 규칙 · AI 모델 아님"]);
   assert.equal(severityCard(REJECTED).value, "CRITICAL"); assert.equal(consensusCard(REJECTED).value, "3/3 FAIL");
   const html = text(renderToStaticMarkup(<><VerdictCards votes={VOTES101} release={R101} admission={blocked} round={REJECTED} /><V3FlowMap flow={flow} /></>));
   for (const value of ["폐기됨 · 영구 (같은 바이트 재등록 불가)", "긴급 격리 실행 · CANARY_EXFILTRATION", "FAIL 근거 4건", "BLOCK · RELEASE_REVOKED"]) assert.ok(html.includes(value), value);
   assert.doesNotMatch(html, /ALLOW/);
   assert.equal(shownRound(VOTES101)?.roundId, REJECTED.roundId, "the deciding (revoking) round is shown for a release");
+});
+
+test("a stage-AI finding is called AI only for a vote whose own witness answered; otherwise it is the local semantic rule", () => {
+  // No lane has a witness (the local stack, and B by design): the scanner's local fallback hard-codes stage AI.
+  const rows = findingsOf(REJECTED, VOTES101), semantic = rows.find((row) => row.code === "SEMANTIC_BEHAVIOR_MISMATCH")!;
+  assert.equal(semantic.deterministic, false); assert.deepEqual(semantic.stages, ["로컬 의미 규칙 (AI 모델 아님)"]); assert.deepEqual(semantic.lanes, ["A", "B", "C"]);
+  assert.deepEqual(rows.filter((row) => row.deterministic).map((row) => row.code), ["CANARY_EXFILTRATION", "SENSITIVE_FILE_READ", "UNDECLARED_EGRESS", "UNSAFE_MODULE_LOAD"]);
+  const html = text(renderToStaticMarkup(<FindingsPanel round={REJECTED} votes={VOTES101} />));
+  assert.doesNotMatch(html, /AI 증인|(^|[^가-힣A-Z_])AI ·/, "no finding is labelled AI when no witness answered");
+  assert.match(html, /참고 SEMANTIC_BEHAVIOR_MISMATCH/); assert.match(html, /승인·폐기 근거 아님 · PASS를 보류로만 바꿈/); assert.match(html, /보고 검증자 A·B·C/);
+  // A answered with its own model, B has rules only: the same code is AI for A and the local rule for B.
+  const mixed = round(SCAN101, "REJECTED", [cast(A, "FAIL", "d", {}, { ai: { model: "gpt-6-luna", status: "COMPLETED" } }), cast(B, "FAIL", "e"), cast(C, "FAIL", "9")]);
+  const both = findingsOf(mixed, VOTES101).find((row) => row.code === "SEMANTIC_BEHAVIOR_MISMATCH")!;
+  assert.deepEqual(both.stages, ["AI 증인 · 참고", "로컬 의미 규칙 (AI 모델 아님)"]);
+  assert.deepEqual(groundsCard(mixed).lines, ["의심 신호 1건 · 승인·폐기 근거 아님", "AI 증인 의심 포함 · PASS를 보류로만 바꿈"]);
+});
+
+test("a quarantine belongs to the round whose evidence backs it, and a lane says nothing about it before the indexer has seen its vote", () => {
+  const quarantine = { validator: C, reason: "CANARY_EXFILTRATION", evidenceHash: h("9"), expiresAt: sec(NOW + 3_000_000), txHash: h("1") };
+  // C's vote is on chain but its transaction is not indexed yet: neither "격리 안 함" nor a quarantine from another round.
+  const unindexed = round(SCAN101, "OPEN", [none(A), none(B), cast(C, "FAIL", "c", { txHash: null })], null);
+  let c = flowView({ release: R101, votes: votesOf(R101, [unindexed], { quarantines: [] }), round: unindexed }).lanes[2];
+  assert.equal(c.quarantine.title, "격리 기록 확인 중"); assert.equal(c.quarantine.state, "running");
+  // An older round's quarantine (its evidence backs C's vote there) is not shown on a later round.
+  const later = round(SCAN100, "OPEN", [none(A), none(B), cast(C, "FAIL", "c")], null), earlier = { ...REJECTED, roundId: h("e") };
+  c = flowView({ release: R101, votes: votesOf(R101, [later, earlier], { quarantines: [quarantine] }), round: later }).lanes[2];
+  assert.equal(c.quarantine.title, "격리 안 함");
+  // C quarantines first and votes after: until the vote lands the quarantine already shows on C's lane.
+  const before = round(SCAN101, "OPEN", [none(A), none(B), none(C)], null);
+  c = flowView({ release: R101, votes: votesOf(R101, [before], { quarantines: [quarantine] }), round: before }).lanes[2];
+  assert.equal(c.quarantine.title, "긴급 격리 실행 · CANARY_EXFILTRATION");
+  assert.match(verdictCard({ votes: votesOf(R100, [before], { status: "QUARANTINED", quarantineUntil: quarantine.expiresAt, quarantines: [] }), release: R100 }).lines[0], /검증자 확인 중/);
+});
+
+test("a failed chain read never becomes a state: no database fallback, no UNVERIFIED, no approval", () => {
+  assert.deepEqual(chainState({ votes: undefined, release: R100, error: "운영 API에 연결할 수 없습니다 (503)." }), { status: null, text: "체인 조회 실패 · 상태 미확인 (승인으로 간주하지 않음)", failed: true });
+  assert.equal(chainState({ votes: { ...VOTES100, status: undefined, registered: true, rounds: [] }, release: { ...R100, status: "UNVERIFIED", chainUnavailable: true } }).status, null);
+  assert.match(chainState({ votes: { ...VOTES100, status: undefined, registered: true, rounds: [] }, release: { ...R100, chainUnavailable: true } }).text, /체인 조회 불가/);
+  assert.equal(chainState({ votes: { ...VOTES100, status: undefined, registered: false, rounds: [] }, release: R100 }).text, "체인에 미등록");
+  assert.equal(chainState({ votes: VOTES101, release: { ...R101, status: "VERIFIED" } }).status, "REVOKED", "the chain view wins over the database copy");
+  const card = verdictCard({ votes: undefined, release: R100, admission: null, votesError: "조회 실패" });
+  assert.equal(card.value, "—"); assert.notEqual(card.tone, "pass"); assert.match(card.lines[0], /체인 조회 실패/);
+  assert.equal(flowView({ release: R100, votes: undefined, votesError: "조회 실패" }).status, null);
+
 });
 
 test("split and quarantined releases are never green and never produce an ALLOW", () => {
@@ -158,7 +221,8 @@ test("progress phases follow the data: operator, validators, decided, done, term
   const twoOfThree = round(SCAN100, "APPROVED", [cast(A, "PASS", "a"), none(B), cast(C, "PASS", "c")], 10_000);
   assert.equal(progressPhase({ scanId: null }), "none");
   assert.equal(progressPhase({ scanId: SCAN100, signedOut: true }), "login");
-  assert.equal(progressPhase({ scanId: SCAN100, notFound: true }), "error");
+  assert.equal(progressPhase({ scanId: SCAN100, notFound: true }), "missing", "an unknown scan ID is not a failed scan");
+  assert.equal(progressPhase({ scanId: SCAN100, failed: true, scan: null }), "error", "an unreachable API before the first read is shown, not left loading");
   assert.equal(progressPhase({ scanId: SCAN100, scan: null }), "loading");
   assert.equal(progressPhase({ scanId: SCAN100, scan: scan(SCAN100, R100, "RUNNING"), now: NOW }), "operator");
   assert.equal(progressPhase({ scanId: SCAN100, scan: scan(SCAN100, R100, "DEAD_LETTER"), now: NOW }), "error");
@@ -195,30 +259,30 @@ test("startScan registers only when the chain does not have the release, never o
   const deps = (api: Parameters<typeof startScan>[1]["api"], capabilities = ADMIN) => ({ api, capabilities, policies: POLICIES, attemptKey: "attempt-1", onPhase: () => {}, sleep: async () => {} });
   const scanned = (reusedResult = false) => ({ scan: { scanId: SCAN100 }, reusedResult });
   // Registered already: no register call; the active default policy and the click's own key go with the scan request.
-  let fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.endsWith("/votes") ? VOTES100 : path === "scans" ? scanned() : new Error(path));
+  let fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.includes("/votes") ? VOTES100 : path === "scans" ? scanned() : new Error(path));
   assert.deepEqual(await startScan("1.0.0", deps(fake.api)), { kind: "scan", scanId: SCAN100, reused: false });
-  assert.deepEqual(fake.calls.map((call) => call.path), ["releases/resolve", `releases/${R100.releaseId}/votes`, "scans"]);
+  assert.deepEqual(fake.calls.map((call) => call.path), ["releases/resolve", `releases/${R100.releaseId}/votes?policyHash=${policyHash}`, "scans"], "the vote view is read under the policy the scan will use");
   assert.deepEqual(fake.calls[0].body, { sourceType: "fixture", locator: "mail-mcp-1.0.0" });
   assert.deepEqual(fake.calls[2].body, { releaseId: R100.releaseId, policyHash }); assert.equal(fake.calls[2].key, "attempt-1");
   // Not on chain + admin: register, wait for the action to complete, then scan.
   let polls = 0;
-  fake = fakeApi((path) => path === "releases/resolve" ? { release: { ...R100, status: "UNVERIFIED" } } : path.endsWith("/votes") ? { ...VOTES100, registered: false, status: undefined, rounds: [] }
+  fake = fakeApi((path) => path === "releases/resolve" ? { release: { ...R100, status: "UNVERIFIED" } } : path.includes("/votes") ? { ...VOTES100, registered: false, status: undefined, rounds: [] }
     : path.endsWith("/register") ? { action: register(R100, "NEW") } : path.startsWith("chain/actions/") ? { action: register(R100, ++polls < 2 ? "SUBMITTED" : "COMPLETED") }
     : path === "scans" ? scanned(true) : new Error(path));
   const phases: string[] = [];
   assert.deepEqual(await startScan("1.0.0", { ...deps(fake.api), onPhase: (phase) => phases.push(phase) }), { kind: "scan", scanId: SCAN100, reused: true });
-  assert.deepEqual(fake.calls.map((call) => call.path.replace(/0x[0-9a-f]+/, "ID")), ["releases/resolve", "releases/ID/votes", "releases/ID/register", "chain/actions/ID", "chain/actions/ID", "scans"]);
+  assert.deepEqual(fake.calls.map((call) => call.path.replace(/0x[0-9a-f]+/g, "ID")), ["releases/resolve", "releases/ID/votes?policyHash=ID", "releases/ID/register", "chain/actions/ID", "chain/actions/ID", "scans"]);
   assert.deepEqual(phases, ["resolving", "registering", "requesting"]); assert.equal(fake.calls.at(-1)!.key, "attempt-1");
   // Not on chain + operator: refused before any register call.
-  fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.endsWith("/votes") ? { ...VOTES100, registered: false, rounds: [] } : new Error(path));
+  fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.includes("/votes") ? { ...VOTES100, registered: false, rounds: [] } : new Error(path));
   await assert.rejects(startScan("1.0.0", deps(fake.api, OPERATOR)), /관리자 토큰이 필요합니다/);
   assert.equal(fake.calls.filter((call) => call.path.endsWith("/register")).length, 0);
   // Revoked: the evidence screen, never a new scan.
-  fake = fakeApi((path) => path === "releases/resolve" ? { release: R101 } : path.endsWith("/votes") ? VOTES101 : new Error(path));
+  fake = fakeApi((path) => path === "releases/resolve" ? { release: R101 } : path.includes("/votes") ? VOTES101 : new Error(path));
   assert.deepEqual(await startScan("1.0.1", deps(fake.api)), { kind: "revoked", releaseId: R101.releaseId });
   assert.equal(fake.calls.filter((call) => call.path === "scans").length, 0);
   // A failed registration and a missing default policy stop with a message.
-  fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.endsWith("/votes") ? { ...VOTES100, registered: false, rounds: [] }
+  fake = fakeApi((path) => path === "releases/resolve" ? { release: R100 } : path.includes("/votes") ? { ...VOTES100, registered: false, rounds: [] }
     : path.endsWith("/register") ? { action: { ...register(R100, "DEAD_LETTER"), errorCode: "CHAIN_REVERTED" } } : new Error(path));
   await assert.rejects(startScan("1.0.0", deps(fake.api)), /온체인 등록 실패 · CHAIN_REVERTED/);
   await assert.rejects(startScan("1.0.0", { ...deps(fakeApi(() => new Error("unused")).api), policies: [POLICIES[0]] }), /기본 정책\(mvp-default-v1\)을 찾지 못했습니다/);
@@ -227,11 +291,47 @@ test("startScan registers only when the chain does not have the release, never o
 test("history rows come from operator scans with each scan's own round", () => {
   const html = renderToStaticMarkup(<RunsTable board={{ scans: [scan(SCAN101, R101, "COMPLETED", "FAIL"), scan(SCAN100, R100, "COMPLETED")], releases: [R100, R101], votes: { [R100.releaseId]: VOTES100, [R101.releaseId]: VOTES101 } }} />);
   assert.equal((html.match(/data-scan-row/g) ?? []).length, 2);
-  for (const value of [`/scan-results?scan=${SCAN100}`, `/scan-results?scan=${SCAN101}`, "COMPLETED · 권고 FAIL", "A 실패", "A 통과", "폐기", "승인"]) assert.ok(html.includes(value), value);
+  for (const value of [`/scan-results?scan=${SCAN100}`, `/scan-results?scan=${SCAN101}`, "COMPLETED · 권고 FAIL", "A 불합격", "A 통과", "폐기", "승인", "mail-mcp"]) assert.ok(html.includes(value), value);
+  assert.doesNotMatch(html, /실패/, "a FAIL vote is 불합격; 실패 is kept for errors");
+  // The tool name comes from the release, never a fixed "mail-mcp".
+  const other = { ...R100, releaseId: h("9"), legacyReleaseId: "weather-mcp@2.0.0", version: "2.0.0" };
+  const row = renderToStaticMarkup(<RunsTable board={{ scans: [scan(SCAN100, other, "COMPLETED")], releases: [other], votes: {} }} />);
+  assert.match(row, /weather-mcp/); assert.doesNotMatch(row, /mail-mcp/);
+});
+
+test("the progress history keeps this scan's and this round's records and only counts internal bookkeeping", () => {
+  const items: HistoryItem[] = [event("validator.vote.received", { scanId: SCAN100, roundId: APPROVED.roundId, validator: C, verdict: "PASS" }),
+    event("validator.vote.received", { scanId: SCAN101, roundId: REJECTED.roundId, validator: C, verdict: "FAIL" }),
+    event("chain.VoteRecorded", { roundId: APPROVED.roundId.toUpperCase().replace(/^0X/, "0x"), validator: A }), event("chain.VoteRecorded", { roundId: REJECTED.roundId, validator: A }),
+    event("chain.action.retry_scheduled", { actionId: h("3") }), event("scan.state.changed", { scanId: SCAN100 }), { ...event("scan.queued", { scanId: SCAN100 }), createdAt: new Date(NOW - 60_000).toISOString() }];
+  const mine = runHistory(items, { since: new Date(NOW - 30_000).toISOString(), scanId: SCAN100, roundId: APPROVED.roundId });
+  assert.deepEqual(mine.map((item) => item.eventName), ["validator.vote.received", "chain.VoteRecorded", "chain.action.retry_scheduled", "scan.state.changed"]);
+  assert.equal(eventText(items[4], VOTES100), null); assert.equal(eventText(items[5], VOTES100), null);
+  assert.equal(eventText(items[2], VOTES100), "체인 기록 · 검증자 A 표");
+});
+
+test("times read as one unit, and the vote view goes to the proxy with the exact policy only", async () => {
+  assert.equal(when(new Date(2026, 10, 3, 23, 51).getTime() / 1000), "11.03\u00a023:51");
+  assert.equal(votesPath(h("a"), policyHash), `releases/${h("a")}/votes?policyHash=${policyHash}`);
+  assert.equal(votesPath(h("a"), "mvp-default-v1"), `releases/${h("a")}/votes`); assert.equal(votesPath(h("a"), undefined), `releases/${h("a")}/votes`);
+  const token = "synthetic-site-v3-proxy-token", calls: string[] = [];
+  const backend = createServer((request, response) => { calls.push(request.url ?? ""); response.setHeader("content-type", "application/json"); response.end('{"items":[]}'); });
+  await new Promise<void>((done) => backend.listen(0, "127.0.0.1", done));
+  const saved = { api: process.env.MCPSHIELD_API_URL, origin: process.env.MCPSHIELD_PUBLIC_ORIGIN };
+  process.env.MCPSHIELD_API_URL = `http://127.0.0.1:${(backend.address() as { port: number }).port}`; process.env.MCPSHIELD_PUBLIC_ORIGIN = "https://console.test";
+  const context = (...path: string[]) => ({ params: Promise.resolve({ path }) }), headers = { cookie: `mcpshield_control=${token}` }, id = h("a");
+  try {
+    for (const [url, path] of [[`releases/${id}/votes?policyHash=${policyHash}`, ["releases", id, "votes"]], [`releases/${id}/votes?policyHash=${policyHash}0`, ["releases", id, "votes"]],
+      [`releases?policyHash=${policyHash}`, ["releases"]]] as const) assert.equal((await GET(new NextRequest(`https://console.test/api/control/${url}`, { headers }), context(...path))).status, 200);
+    assert.deepEqual(calls, [`/v1/releases/${id}/votes?policyHash=${policyHash}`, `/v1/releases/${id}/votes`, "/v1/releases"]);
+  } finally {
+    for (const [key, value] of [["MCPSHIELD_API_URL", saved.api], ["MCPSHIELD_PUBLIC_ORIGIN", saved.origin]] as const) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    await new Promise((done) => backend.close(done));
+  }
 });
 
 const FORBIDDEN = ["/api/judge", "Minjun", "LOCAL_DEMO", "테스트넷 아님", "not a testnet", "hello@mcpshield.ai", "© 2025", "Executed in Gateway", "Gateway 실행됨", "실행되었습니다",
-  "42.8s", "96.4%", "24 modules", "filesystem-mcp", "mockSnapshot", "Sample Demo", "샘플 검사", "Developer workspace", "AI 위험 분석"];
+  "42.8s", "96.4%", "24 modules", "filesystem-mcp", "mockSnapshot", "Sample Demo", "샘플 검사", "Developer workspace", "AI 위험 분석", "+ AI 증인", "fonts.googleapis.com"];
 async function files(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });
   return (await Promise.all(entries.map((entry) => entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]))).flat();

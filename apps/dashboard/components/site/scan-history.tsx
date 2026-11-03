@@ -20,12 +20,12 @@ export function ScanHistory() {
         <div className="ws-heading"><div><p>SCAN ARCHIVE</p><h1>검사 기록</h1><span>운영 API에 저장된 이 조직의 검사 기록입니다. 브라우저에 따로 저장하지 않습니다.</span></div></div>
         {(session.status === 'error' || error) && <p className="scan-error v3-banner" role="alert">{session.status === 'error' ? session.message : error}</p>}
         <section className="recent panel">
-          <div className="recent-head"><div><h2>전체 검사</h2><p>운영사 검사 1건마다 검증자 라운드 1개가 열립니다.</p></div></div>
+          <div className="recent-head"><div><h2>전체 검사</h2><p>끝난 운영사 검사마다 그 유효기간으로 검증자 라운드가 열립니다. 재사용된 결과는 새 라운드를 열지 않습니다.</p></div></div>
           {session.status === 'signed-out' ? <div className="scan-table"><div className="history-empty"><LoginRequired /></div></div>
             : board?.scans.length ? <RunsTable board={board} />
             : <div className="scan-table">
               <div className="history-empty">
-                <strong>{board ? '아직 검사 기록이 없습니다.' : '검사 기록을 불러오는 중입니다.'}</strong>
+                <strong>{board ? '아직 검사 기록이 없습니다.' : session.status === 'loading' ? '운영 API 세션을 확인하고 있습니다.' : '검사 기록을 불러오는 중입니다.'}</strong>
                 {board && <Link className="ws-button primary" href="/security-scan">첫 검사 시작하기</Link>}
               </div>
             </div>}

@@ -27,12 +27,12 @@ export function Icon({ name }: { name: IconName }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
-export type NavLabel = 'Overview' | 'Security Scan' | 'Scan Results' | 'Validation Logs' | 'History' | 'Settings'
+export type NavLabel = 'Overview' | 'Security Scan' | 'Scan Results' | 'History' | 'Settings'
 
 // Keys stay English (pages pass them as `active`); the shown text is Korean and the EN toggle translates it back.
 const navItems: [IconName, NavLabel, string, string][] = [
   ['grid', 'Overview', '/overview', '개요'], ['scan', 'Security Scan', '/security-scan', '보안 검사'], ['result', 'Scan Results', '/scan-results', '검사 결과'],
-  ['logs', 'Validation Logs', '/scan-results#evidence', '검증 로그'], ['history', 'History', '/history', '검사 기록'], ['settings', 'Settings', '/console', '운영 콘솔'],
+  ['history', 'History', '/history', '검사 기록'], ['settings', 'Settings', '/console', '운영 콘솔'],
 ]
 
 type Shell = { state: 'loading' } | { state: 'signed-out' } | { state: 'signed-in'; tenantId: string; role: string; chainId: number | null } | { state: 'error' }
@@ -69,9 +69,9 @@ export function Sidebar({ active, className = '' }: { active: NavLabel; classNam
     <div className="ws-environment" data-raw><i className={shell.state === 'signed-in' ? '' : 'off'} /> {shell.state === 'signed-in' ? (shell.chainId === null ? '체인 기록 없음' : chainLabel(shell.chainId)) : shell.state === 'loading' ? '체인 확인 중' : '체인: 로그인 후 표시'}</div>
     <nav aria-label="Workspace navigation">
       <small>워크스페이스</small>
-      {navItems.slice(0, 4).map(item)}
+      {navItems.slice(0, 3).map(item)}
       <small>관리</small>
-      {navItems.slice(4).map(item)}
+      {navItems.slice(3).map(item)}
     </nav>
     <div className="ws-system" data-raw>{shell.state === 'signed-in'
       ? <><span><i /> 운영 API 연결됨</span><small>{shell.tenantId} · {shell.role}</small></>
