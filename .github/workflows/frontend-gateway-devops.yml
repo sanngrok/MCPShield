@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-26.04 runners use Docker's containerd image store, where `docker image inspect .Id`
+    # is the manifest digest rather than the config digest Trivy reports, so the image gates fail there.
+    runs-on: ubuntu-24.04
     # Bounded independent OCI rescans and four single-key validator processes
     # run sequentially on the same trusted local images/database.
     timeout-minutes: 55
@@ -256,7 +258,7 @@ jobs:
           fi
 
   postgres:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:
       postgres:
@@ -302,7 +304,7 @@ jobs:
     # This job never signs or publishes a release.
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.repeat_demo }}
     needs: [verify, postgres]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -330,7 +332,7 @@ jobs:
     # below additionally require every upstream verification gate to succeed.
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master/main' }}
     needs: [verify, postgres]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
