@@ -21,6 +21,8 @@ The whole dashboard uses the Figma Make design under the `app/(site)` root layou
 - `/dashboard` and `/try` redirect to `/overview` and `/security-scan`.
 - `/ledger` keeps its own root layout and the older light design.
 
+What the scan screens never claim: a lane role (A, B, C are role names the team runs, `SINGLE_INSTITUTION_DEMO`, said on every flow map) never says it has an AI witness; the witness, its model and whether it answered come from that vote's own evidence. A stage-`AI` finding is called AI only for a vote whose witness answered (`evidence.ai.status === "COMPLETED"`); otherwise it is the scanner's local semantic rule, and a suspicion is shown as a reference that can only hold a PASS. A quarantine is tied to a round by the evidence hash that backs both it and the vote. The vote view is read under the policy the site scans with (`?policyHash=`, the only extra query the proxy forwards, and only on `releases/:id/votes`). A failed chain read shows no state at all (never the database copy, never UNVERIFIED). Admission is looked up only once the chain has a conclusion, since every lookup is audited like a Gateway check. The stylesheet loads no web fonts, so recordings use the same local fonts as the checked captures.
+
 ## Tenant operations console
 
 ### Prepared npm execution and change notifications
