@@ -5,13 +5,24 @@ npm.cmd ci
 npm.cmd run dev --workspace @mcpshield/dashboard
 ```
 
-Open `http://localhost:3000`. MOCK works without a backend. LIVE reads releases, latest scans, and events. In Compose it also validates Gateway A/B's shared pre-spawn probe evidence; without that configured evidence directory, Backend admission results are explicitly labeled as Backend results rather than Gateway execution. On timeout or malformed data it switches to a clearly labeled REPLAY snapshot and emits an accessible error alert.
+Open `http://localhost:3000/overview` for the Control Room overview. MOCK works without a backend. LIVE reads releases, latest scans, and events. In Compose it also validates Gateway A/B's shared pre-spawn probe evidence; without that configured evidence directory, Backend admission results are explicitly labeled as Backend results rather than Gateway execution. On timeout or malformed data it switches to a clearly labeled REPLAY snapshot and emits an accessible error alert.
 
 Set `MCPSHIELD_API_URL` for LIVE, `MCPSHIELD_REPLAY_FILE` for an alternate replay bundle, `MCPSHIELD_GATEWAY_EVIDENCE_DIR` for Gateway probe files, and optionally `MCPSHIELD_EXPLORER_URL` for EVM transaction links. LIVE automatically reads `GET /api/releases/:releaseId/scans/latest`, so every new random scanner result replaces the displayed evidence without configuration. Unconfigured or invalid explorer URLs are never rendered as links.
 
 `lib/backend-client.ts` is the server-only integration boundary for all seven frozen Backend APIs: release register/get, scan submit/get, validator vote, admission check, and event listing. The dashboard view intentionally calls only read/admission operations; privileged mutations remain available to the demo seeder and scanner rather than browser code, so admin/scanner credentials are never bundled into the client.
 
 Roll back by selecting MOCK/REPLAY or stopping the dashboard container.
+
+## Product site (Figma design)
+
+The whole dashboard uses the Figma Make design under the `app/(site)` root layout (`site.css`, components in `components/site/`).
+
+- `/` — product landing page.
+- `/security-scan` → `/scan-progress` → `/scan-results` — runs the judge demo session through `/api/judge` (Backend `/api/demo`, enabled with `MCPSHIELD_JUDGE_DEMO_ENABLED=true`). Only the fixed synthetic `mail-mcp@1.0.0` / `1.0.1` fixtures are scanned; checking 1.0.1 first verifies the 1.0.0 baseline. Every stage, finding, validator signature, Gateway decision and event shown comes from the session response; the ledger is `LOCAL_DEMO`, not a testnet.
+- `/history` — scans started in this browser (localStorage, last 20). Sessions expire after 15 minutes on the Backend, so each record keeps its last session snapshot; `/scan-results` falls back to the Backend session when the record is missing.
+- `/overview` — the former Control Room (MOCK / LIVE / REPLAY evidence with the same explicit fallback rules).
+- `/console` (sidebar `Settings`) — the tenant operations console below, rendered unchanged inside the workspace shell; `console.css` restyles its existing `ops-*` markup and the console text is excluded from the KR/EN translator so API states stay verbatim.
+- `/dashboard` and `/try` redirect to `/overview` and `/security-scan`.
 
 ## Tenant operations console
 
