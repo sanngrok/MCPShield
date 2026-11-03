@@ -193,6 +193,9 @@ for (const [index, name] of NAMES.entries()) {
       if (!accepting) return;
       const onChain = await reader.releases(scan.releaseId);
       if (!onChain.exists) continue; // not registered on chain yet: look again on the next pass
+      // The round starts at the operator scan's validFrom (wall clock); a validator refuses a window the chain head has not
+      // reached yet (ROUND_WINDOW_INVALID) and would never retry. Blocks come every second or two: look again on the next pass.
+      if (Math.floor(Date.parse(scan.result?.validFrom) / 1000) > Number((await relayer.provider.getBlock("latest"))?.timestamp ?? 0)) continue;
       handled.add(scan.scanId);
       const mine = turn(scan.scanId, name);
       try {
