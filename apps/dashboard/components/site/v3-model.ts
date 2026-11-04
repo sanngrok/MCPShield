@@ -126,7 +126,8 @@ export function witnessText(vote?: V3Vote | null): Witness {
   return { label: "응답 없음", model: ai.model ?? "모델 미상", tone: "review", state: "silent", note: basis.includes("AI_UNAVAILABLE") ? "PASS 대신 보류 (AI_UNAVAILABLE)" : undefined };
 }
 
-export type Cell = { state: StepState; tone: Tone; title: string; lines: string[]; tx?: { hash: string; href: string | null } | null };
+/** tx.label "중계": the hash is the operator's completed relay of this signed vote, not yet seen by the indexer (same width as "거래"). */
+export type Cell = { state: StepState; tone: Tone; title: string; lines: string[]; tx?: { hash: string; href: string | null; label?: string } | null };
 export type LaneView = { lane: Lane; role: string; address: string | null; vote: V3Vote | undefined; voteKey: "PASS" | "FAIL" | "ABSTAIN" | "NONE";
   rescan: Cell; witness: Witness; signed: Cell; quarantine: Cell };
 
@@ -157,7 +158,7 @@ export function laneViews({ votes, round, scanId, history = [], chainId = null }
     if (vote?.cast && vote.verdict) {
       signed = { state: "done", tone: toneOfVerdict(vote.verdict), title: `${vote.verdict} · ${verdictKo(vote.verdict)}`,
         lines: [`증거 ${short(vote.evidenceHash)}`, ...(vote.txHash ? [] : ["거래 해시 확인 중"]), ...(vote.afterDecision ? ["결론 뒤 기록 · 결과 불변"] : [])],
-        tx: vote.txHash ? { hash: vote.txHash, href: txHref(chainId, vote.txHash) } : null };
+        tx: vote.txHash ? { hash: vote.txHash, href: txHref(chainId, vote.txHash), ...(vote.txSource === "OPERATOR_RELAY" ? { label: "중계" } : {}) } : null };
     } else if (relayed) signed = { state: "running", tone: "neutral", title: "중계 접수 · 체인 기록 대기", lines: [] };
     else signed = { state: "pending", tone: "neutral", title: "아직 투표 안 함", lines: [] };
     // A quarantine and the vote it comes with are backed by the same evidence file, so the evidenceHash ties a quarantine to this
@@ -167,10 +168,21 @@ export function laneViews({ votes, round, scanId, history = [], chainId = null }
     const record = votes?.quarantines?.find((item) => sameHex(item.validator, address)
       && (vote?.cast ? sameHex(item.evidenceHash, vote.evidenceHash) : !elsewhere.has(item.evidenceHash.toLowerCase())));
     const revokedNote = votes?.status === "REVOKED" ? ["폐기가 격리보다 우선"] : [];
+    // "격리 안 함" needs evidence. With the registry read: this validator never used its one quarantine on this release, or the
+    // quarantine it used is tied by evidence to its vote in another round. A quarantine is not tied to a round on chain, so an indexed
+    // vote alone never says it. Without the registry read (an older API), an indexed vote keeps the earlier rule.
+    const used = address !== null ? votes?.quarantineUsedAt?.[address.toLowerCase()] : undefined;
+    const own = votes?.quarantines?.filter((item) => sameHex(item.validator, address)) ?? [];
+    const unmatched = own.find((item) => !elsewhere.has(item.evidenceHash.toLowerCase()));
+    // An indexed quarantine of this validator that no other round's vote accounts for always wins over a 0 read (reads of one view can
+    // come from RPC backends at different heights).
+    const none = used === undefined ? Boolean(vote?.txHash) && vote?.txSource !== "OPERATOR_RELAY" : !unmatched && (used === 0 || own.length > 0);
     let quarantine: Cell;
     if (record) quarantine = { state: "done", tone: "fail", title: `긴급 격리 실행 · ${record.reason ?? "사유 미상"}`, lines: [`만료 ${when(record.expiresAt)}`, ...revokedNote],
       tx: { hash: record.txHash, href: txHref(chainId, record.txHash) } };
-    else if (vote?.cast && vote.txHash) quarantine = { state: "done", tone: "neutral", title: "격리 안 함", lines: [] };
+    else if (vote?.cast && none) quarantine = { state: "done", tone: "neutral", title: "격리 안 함", lines: [] };
+    else if (vote?.cast && unmatched) quarantine = { state: "done", tone: "fail", title: `긴급 격리 기록 · ${unmatched.reason ?? "사유 미상"}`,
+      lines: ["이 표와 다른 증거로 기록됨", `만료 ${when(unmatched.expiresAt)}`, ...revokedNote], tx: { hash: unmatched.txHash, href: txHref(chainId, unmatched.txHash) } };
     else if (vote?.cast) quarantine = { state: "running", tone: "neutral", title: "격리 기록 확인 중", lines: ["인덱서 관측 전"] };
     else quarantine = { state: "pending", tone: "neutral", title: "대기", lines: [] };
     return { lane, role: LANE_ROLE[lane], address, vote, voteKey: vote?.cast && vote.verdict ? vote.verdict : "NONE", rescan, witness: witnessText(vote), signed, quarantine };
@@ -305,8 +317,10 @@ export function progressPhase({ scanId, signedOut = false, notFound = false, fai
     return "validators";
   }
   if (round.outcome === "OPEN" || !DECIDED.has(round.outcome)) return "validators";
-  // Wait (at most 45 s after the decision) for the remaining votes and for the indexer to see every cast vote's transaction.
-  const settledVotes = round.votes.filter((vote) => vote.cast).length >= 3 && round.votes.every((vote) => !vote.cast || Boolean(vote.txHash));
+  // Wait (at most 45 s after the decision) for the remaining votes and, for every cast vote, a transaction and whether it came after
+  // the decision (from the indexer, or from the receipt of the operator's own relay of that exact vote).
+  const settledVotes = round.votes.filter((vote) => vote.cast).length >= 3
+    && round.votes.every((vote) => !vote.cast || (Boolean(vote.txHash) && vote.afterDecision !== null && vote.afterDecision !== undefined));
   const sinceDecision = round.decidedAt ? now - round.decidedAt * 1000 : 0;
   if ((!settledVotes && sinceDecision < 45_000) || !admission || admissionPending) return "decided";
   return "done";

@@ -189,6 +189,61 @@ test("a quarantine belongs to the round whose evidence backs it, and a lane says
   assert.match(verdictCard({ votes: votesOf(R100, [before], { status: "QUARANTINED", quarantineUntil: quarantine.expiresAt, quarantines: [] }), release: R100 }).lines[0], /검증자 확인 중/);
 });
 
+test("before the indexer reaches a vote, the operator's completed relay names its transaction, and only the registry's quarantine record says 격리 안 함", () => {
+  // Base Sepolia: the indexer lags by hours while the outbox already holds a status-1 receipt for each relayed vote, and the API reads
+  // each vote's VoteRecorded log (afterDecision) from that receipt.
+  const relayed = (validator: string, digit: string, afterDecision: boolean | null = false) => cast(validator, "PASS", digit, { txHash: h("2"), txSource: "OPERATOR_RELAY", afterDecision });
+  const live = round(SCAN100, "APPROVED", [relayed(A, "a"), relayed(B, "b", true), relayed(C, "c")], 5_000);
+  const never = { [A.toLowerCase()]: 0, [B.toLowerCase()]: 0, [C.toLowerCase()]: 0 };
+  let lanes = flowView({ release: R100, votes: votesOf(R100, [live], { quarantineUsedAt: never }), round: live }).lanes;
+  for (const lane of lanes) {
+    assert.equal(lane.signed.tx?.hash, h("2")); assert.equal(lane.signed.tx?.label, "중계", "the hash says where it came from");
+    assert.ok(!lane.signed.lines.includes("거래 해시 확인 중")); assert.equal(lane.quarantine.title, "격리 안 함", "the registry says it never quarantined this release");
+  }
+  // The flow map names the source once, under the lanes, without adding a line to any cell (the progress screen fits 1600x900).
+  const map = text(renderToStaticMarkup(<V3FlowMap flow={flowView({ release: R100, votes: votesOf(R100, [live], { quarantineUsedAt: never }), round: live })} />));
+  assert.match(map, /중계 0x22222222…2222/); assert.match(map, /중계로 표시된 해시는 인덱서가 읽기 전, 운영사가 보낸 그 표의 거래를 성공 영수증으로 확인한 것입니다/);
+  // C has used its one quarantine on this release and nothing is indexed: the lane does not claim either way.
+  lanes = flowView({ release: R100, votes: votesOf(R100, [live], { quarantineUsedAt: { ...never, [C.toLowerCase()]: sec(NOW - 90_000) } }), round: live }).lanes;
+  assert.equal(lanes[2].quarantine.title, "격리 기록 확인 중"); assert.equal(lanes[0].quarantine.title, "격리 안 함");
+  // An API that does not report the registry read: a relay hash alone never becomes "격리 안 함".
+  lanes = flowView({ release: R100, votes: votesOf(R100, [live]), round: live }).lanes;
+  assert.ok(lanes.every((lane) => lane.quarantine.title === "격리 기록 확인 중"));
+  // An indexed hash keeps the old meaning and carries no relay note.
+  const indexed = flowView({ release: R100, votes: votesOf(R100, [APPROVED]), round: APPROVED });
+  assert.ok(indexed.lanes.every((lane) => lane.signed.tx?.label === undefined && lane.quarantine.title === "격리 안 함"));
+  assert.doesNotMatch(text(renderToStaticMarkup(<V3FlowMap flow={indexed} />)), /중계 0x|중계로 표시된/);
+  assert.ok(lanes.length === 3 && flowView({ release: R100, votes: votesOf(R100, [live], { quarantineUsedAt: never }), round: live }).lanes[1].signed.lines.includes("결론 뒤 기록 · 결과 불변"),
+    "the late vote says so from the relay receipt, before the indexer");
+  // The progress screen does not wait out the 45 s grace once every cast vote has a transaction and a known afterDecision; a vote
+  // whose afterDecision is still unknown keeps it waiting (at most 45 s), so the late-vote note is not lost.
+  const allow = admission("ALLOW", "VERIFIED", "RELEASE_VERIFIED"), completed = scan(SCAN100, R100, "COMPLETED");
+  assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: votesOf(R100, [live], { quarantineUsedAt: never }), round: live, admission: allow, now: NOW }), "done");
+  const unknown = round(SCAN100, "APPROVED", [relayed(A, "a"), relayed(B, "b", null), relayed(C, "c")], 5_000);
+  assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: votesOf(R100, [unknown]), round: unknown, admission: allow, now: NOW }), "decided");
+  assert.equal(progressPhase({ scanId: SCAN100, scan: completed, votes: votesOf(R100, [unknown]), round: unknown, admission: allow, now: NOW + 60_000 }), "done");
+});
+
+test("격리 안 함 needs the registry: an indexed vote whose validator used its quarantine with other evidence shows that quarantine", () => {
+  // C quarantined with evidence E1 (h("9")), its first vote never landed, and after a restart its vote landed with new evidence E2.
+  const quarantine = { validator: C, reason: "CANARY_EXFILTRATION", evidenceHash: h("9"), expiresAt: sec(NOW + 3_000_000), txHash: h("1") };
+  const live = round(SCAN101, "OPEN", [none(A), none(B), cast(C, "FAIL", "c", { txSource: "INDEXER" })], null);
+  const usedC = { [A.toLowerCase()]: 0, [B.toLowerCase()]: 0, [C.toLowerCase()]: sec(NOW - 60_000) };
+  let c = flowView({ release: R101, votes: votesOf(R101, [live], { quarantines: [quarantine], quarantineUsedAt: usedC }), round: live }).lanes[2];
+  assert.equal(c.quarantine.title, "긴급 격리 기록 · CANARY_EXFILTRATION"); assert.ok(c.quarantine.lines.includes("이 표와 다른 증거로 기록됨"));
+  assert.equal(c.quarantine.tx?.hash, h("1"));
+  // The same quarantine tied by evidence to C's vote in an earlier round: this round's lane says 격리 안 함.
+  const earlier = { ...REJECTED, roundId: h("e") };
+  c = flowView({ release: R101, votes: votesOf(R101, [live, earlier], { quarantines: [quarantine], quarantineUsedAt: usedC }), round: live }).lanes[2];
+  assert.equal(c.quarantine.title, "격리 안 함");
+  // Used, but not indexed yet: no claim either way.
+  c = flowView({ release: R101, votes: votesOf(R101, [live], { quarantines: [], quarantineUsedAt: usedC }), round: live }).lanes[2];
+  assert.equal(c.quarantine.title, "격리 기록 확인 중");
+  // A 0 read from a lagging RPC backend never hides an indexed quarantine that no other round accounts for.
+  c = flowView({ release: R101, votes: votesOf(R101, [live], { quarantines: [quarantine], quarantineUsedAt: { ...usedC, [C.toLowerCase()]: 0 } }), round: live }).lanes[2];
+  assert.equal(c.quarantine.title, "긴급 격리 기록 · CANARY_EXFILTRATION");
+});
+
 test("a failed chain read never becomes a state: no database fallback, no UNVERIFIED, no approval", () => {
   assert.deepEqual(chainState({ votes: undefined, release: R100, error: "운영 API에 연결할 수 없습니다 (503)." }), { status: null, text: "체인 조회 실패 · 상태 미확인 (승인으로 간주하지 않음)", failed: true });
   assert.equal(chainState({ votes: { ...VOTES100, status: undefined, registered: true, rounds: [] }, release: { ...R100, status: "UNVERIFIED", chainUnavailable: true } }).status, null);

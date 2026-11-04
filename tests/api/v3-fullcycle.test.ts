@@ -146,7 +146,15 @@ test("V3 operator relay: validators vote from their own scans and evidence, diss
     await refused("/v1/validator/attestations", { scanId: safe.scan.scanId, payload: abstain, signature: await sign(abstain), evidence: `${dissent.file} ` }, "VALIDATOR_EVIDENCE_HASH_MISMATCH");
     const moved = { ...abstain, validUntil: abstain.validUntil - 1 };
     await refused("/v1/validator/attestations", { scanId: safe.scan.scanId, payload: moved, signature: await sign(moved) }, "ATTESTATION_BINDING_MISMATCH");
-    await settle((await post("/v1/validator/attestations", { scanId: safe.scan.scanId, payload: abstain, signature: await sign(abstain), evidence: dissent.file })).action.actionId);
+    const relayedAbstain = await post("/v1/validator/attestations", { scanId: safe.scan.scanId, payload: abstain, signature: await sign(abstain), evidence: dissent.file });
+    // A restarted validator re-scans and signs different evidence: while its first vote is still in the outbox, the second is refused.
+    const rescanned = evidenceDocument(C, identity, { scanStatus: "PASSED", findings: [{ code: "SEMANTIC_BEHAVIOR_MISMATCH", severity: "MEDIUM", stage: "AI", deterministic: false }] },
+      { verdict: "ABSTAIN", basis: ["SEMANTIC_BEHAVIOR_MISMATCH"] }, { required: true, provider: "openai", model: "synthetic-witness", status: "COMPLETED" });
+    assert.notEqual(rescanned.evidenceHash, dissent.evidenceHash);
+    const second = { ...abstain, evidenceHash: rescanned.evidenceHash };
+    const pendingRefused = await call("POST", "/v1/validator/attestations", { scanId: safe.scan.scanId, payload: second, signature: await sign(second), evidence: rescanned.file });
+    assert.equal(pendingRefused.statusCode, 409, pendingRefused.body); assert.equal(pendingRefused.json().error.code, "VOTE_RELAY_PENDING");
+    await settle(relayedAbstain.action.actionId);
 
     await mine();
     for (const agent of ["Gateway-A", "Gateway-B"]) assert.equal((await gateway(safe.release, agent)).decision, "ALLOW", agent);
@@ -160,6 +168,30 @@ test("V3 operator relay: validators vote from their own scans and evidence, diss
     assert.deepEqual(safeVotes[C].evidence.basis, ["SEMANTIC_BEHAVIOR_MISMATCH"]); assert.equal(safeVotes[C].evidence.consistent, true);
     assert.deepEqual(safeVotes[C].evidence.ai, { model: "synthetic-witness", status: "COMPLETED" }, "the validator's own AI witness, from its signed evidence");
     assert.equal(safeVotes[A].evidence.ai, null, "no witness configured is reported as none, never as an AI approval");
+    // Before the indexer runs, each relayed vote names the operator's completed relay transaction and says where the hash came from.
+    assert.equal(safeVotes[A].txHash, safeA.transactions[0].txHash); assert.equal(safeVotes[B].txHash, safeB.transactions[0].txHash);
+    assert.ok([A, B, C].every((validator) => safeVotes[validator].txSource === "OPERATOR_RELAY" && /^0x[0-9a-f]{64}$/.test(safeVotes[validator].txHash)), "relay hash before indexing");
+    assert.deepEqual([A, B, C].map((validator) => safeVotes[validator].afterDecision), [false, false, true], "read from each relay's own VoteRecorded log");
+    assert.deepEqual(safeView.quarantineUsedAt, { [A.toLowerCase()]: 0, [B.toLowerCase()]: 0, [C.toLowerCase()]: 0 }, "registry read: nobody quarantined 1.0.0");
+    // Only a COMPLETED relay whose own receipt carries the vote names it: a record without actionId (written before this field) or
+    // an action that is not COMPLETED shows no transaction, as before.
+    const recordKeyA = `${safeRound.roundId}:${A.toLowerCase()}`, recordA = (await store.get("test-team", "validator-vote", recordKeyA))!;
+    assert.ok(typeof recordA?.actionId === "string", "the relay keeps the outbox actionId on the vote record");
+    const voteA = async () => byValidator((await votes(safe.release.releaseId)).rounds[0])[A];
+    await store.put("test-team", "validator-vote", recordKeyA, { ...recordA, actionId: undefined }, true);
+    assert.deepEqual([(await voteA()).txHash, (await voteA()).txSource], [null, null], "no actionId, no relay hash");
+    await store.put("test-team", "validator-vote", recordKeyA, recordA, true);
+    await store.query("UPDATE cp_chain_actions SET state = 'SUBMITTED' WHERE action_id = ?", [recordA.actionId]);
+    assert.deepEqual([(await voteA()).txHash, (await voteA()).txSource], [null, null], "a relay without a status-1 receipt names nothing");
+    await store.query("UPDATE cp_chain_actions SET state = 'COMPLETED' WHERE action_id = ?", [recordA.actionId]);
+    assert.equal((await voteA()).txHash, safeA.transactions[0].txHash);
+    // A COMPLETED action whose receipt carries another vote (B's relay) names nothing for A.
+    const actionId = (await store.get("test-team", "validator-vote", `${safeRound.roundId}:${B.toLowerCase()}`))!.actionId;
+    await store.query("UPDATE cp_chain_actions SET tx_hash = ? WHERE action_id = ?", [safeB.transactions[0].txHash, recordA.actionId]);
+    assert.ok(typeof actionId === "string");
+    assert.deepEqual([(await voteA()).txHash, (await voteA()).afterDecision], [null, null], "a receipt without this exact vote names nothing");
+    await store.query("UPDATE cp_chain_actions SET tx_hash = ? WHERE action_id = ?", [safeA.transactions[0].txHash, recordA.actionId]);
+    assert.equal((await voteA()).txHash, safeA.transactions[0].txHash);
     const served = await call("GET", `/v1/releases/${safe.release.releaseId}/votes/${safeRound.roundId}/${C}/evidence`);
     assert.equal(`0x${createHash("sha256").update(served.body).digest("hex")}`, dissent.evidenceHash, "the exact evidence bytes are served for re-hashing");
 
@@ -186,12 +218,52 @@ test("V3 operator relay: validators vote from their own scans and evidence, diss
       "the direct quarantine is shown with its validator, reason and transaction");
     assert.deepEqual([badRound.rejections, badRound.approvals, badRound.abstentions], [3, 0, 0]);
     assert.equal(badVotes[A].afterDecision, false); assert.equal(badVotes[B].afterDecision, true, "a vote after the revocation is kept, not dropped");
-    assert.ok(badRound.votes.every((vote: any) => /^0x[0-9a-f]{64}$/.test(vote.txHash) && vote.evidence?.consistent === true && vote.agreesWithOperator === true));
-    assert.equal(byValidator((await votes(safe.release.releaseId)).rounds[0])[C].afterDecision, true);
+    assert.ok(badRound.votes.every((vote: any) => /^0x[0-9a-f]{64}$/.test(vote.txHash) && vote.txSource === "INDEXER" && vote.evidence?.consistent === true && vote.agreesWithOperator === true));
+    assert.deepEqual([A, B, C].map((validator) => badView.quarantineUsedAt[validator.toLowerCase()] > 0), [false, false, true], "registry read: only C used its quarantine on 1.0.1");
+    const safeIndexed = byValidator((await votes(safe.release.releaseId)).rounds[0]);
+    assert.equal(safeIndexed[C].afterDecision, true);
+    assert.ok([A, B, C].every((validator) => safeIndexed[validator].txSource === "INDEXER" && safeIndexed[validator].txHash === safeVotes[validator].txHash), "the indexed hash is the relay's");
     const indexed = await store.get("test-team", "release", bad.release.releaseId);
     assert.equal(indexed?.status, "REVOKED"); assert.equal(indexed?.chain.registryVersion, 3); assert.equal(indexed?.reportRoot, badRound.roundId);
     const history = (await store.events("test-team", bad.release.releaseId)).map((event) => event.eventName);
     for (const name of ["chain.ReleaseQuarantined", "chain.VoteRecorded", "chain.RoundDecided", "chain.ReleaseRevoked"]) assert.ok(history.includes(name), name);
+
+    // A revoked release takes no quarantine, even in its revoking round (the registry refuses it); the vote template there still works.
+    const noQuarantine = await call("GET", `/v1/scans/${bad.scan.scanId}/quarantine?validator=${A}`);
+    assert.equal(noQuarantine.statusCode, 409, noQuarantine.body); assert.equal(noQuarantine.json().error.code, "RELEASE_REVOKED");
+    assert.equal((await call("GET", `/v1/scans/${bad.scan.scanId}/attestation?validator=${A}`)).statusCode, 200, "the revoking round is still announced (late votes)");
+    // REVOKED is terminal: a later scan's round is never announced, so no validator signs a vote the registry would refuse
+    // (TERMINAL_RELEASE) and the outbox never holds the relayer's nonce on it. Last, because it ages the earlier 1.0.1 scan.
+    await store.query("UPDATE cp_scans SET result_json = json_set(result_json, '$.validUntil', ?) WHERE scan_id = ?", [new Date(Date.now() - 60_000).toISOString(), bad.scan.scanId]);
+    const later = (await post("/v1/scans", { releaseId: bad.release.releaseId, policyHash }, { "idempotency-key": "1.0.1-after-revocation" })).scan;
+    assert.notEqual(later.scanId, bad.scan.scanId);
+    await runControlWorkerOnce(store, options); await mine();
+    const terminal = await call("GET", `/v1/scans/${later.scanId}/attestation?validator=${A}`);
+    assert.equal(terminal.statusCode, 409, terminal.body); assert.equal(terminal.json().error.code, "RELEASE_REVOKED");
+
+    // One registry nonce per validator, shared by all its rounds: while B's vote for one round is in the outbox, a vote for another
+    // round signed with the same nonce is refused (it would revert with REPLAY and hold the relayer's nonce).
+    const rescan = async (key: string) => {
+      const next = (await post("/v1/scans", { releaseId: safe.release.releaseId, policyHash }, { "idempotency-key": key })).scan;
+      await runControlWorkerOnce(store, options); await mine(); return next;
+    };
+    const signedPass = async (scanId: string) => {
+      const template = (await call("GET", `/v1/scans/${scanId}/attestation?validator=${B}`)).json();
+      const doc = evidenceDocument(B, identity, { scanStatus: "PASSED", findings: [] }, { verdict: "PASS", basis: [] }, undefined);
+      const payload = { ...template.payload, evidenceHash: doc.evidenceHash, verdict: 0 };
+      return { roundId: template.roundId, body: { scanId, payload, signature: await new Wallet(keyB).signTypedData(template.domain, attestationV3Types, payload), evidence: doc.file } };
+    };
+    // The operator's PASS is reused for 24 h; ageing the earlier scan lets a new round through each time.
+    const age = (scanId: string) => store.query("UPDATE cp_scans SET result_json = json_set(result_json, '$.validUntil', ?) WHERE scan_id = ?", [new Date(Date.now() - 60_000).toISOString(), scanId]);
+    await age(safe.scan.scanId);
+    const firstScan = await rescan("1.0.0-nonce-first"), first = await signedPass(firstScan.scanId);
+    const accepted = await post("/v1/validator/attestations", first.body);
+    await age(firstScan.scanId); await pause(1100);
+    const otherScan = await rescan("1.0.0-nonce-other"), other = await signedPass(otherScan.scanId);
+    assert.notEqual(first.roundId, other.roundId); assert.equal(first.body.payload.nonce, other.body.payload.nonce);
+    const replay = await call("POST", "/v1/validator/attestations", other.body);
+    assert.equal(replay.statusCode, 409, replay.body); assert.equal(replay.json().error.code, "VOTE_RELAY_PENDING");
+    await settle(accepted.action.actionId);
   } finally {
     pumping = false; await pump;
     const cleanup = await Promise.allSettled([Promise.resolve().then(() => owned.app?.close())]);

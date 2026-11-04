@@ -35,19 +35,44 @@ type SignedAction = (tenantId: string, kind: "ATTEST" | "QUARANTINE", payload: a
  */
 export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, relayer: () => V2Relayer,
   authenticate: (header: string | undefined) => Credential, authorize: (identity: Credential, role: "operator" | "admin") => void, signedAction: SignedAction) {
-  const announce = async (tenantId: string, scanId: string, validator: string) => {
+  const announce = async (tenantId: string, scanId: string, validator: string, purpose: "vote" | "quarantine" = "vote") => {
     const client = relayer(), scan = await store.scan(tenantId, scanId);
     if (!scan?.result || scan.status !== "COMPLETED") throw failure("SCAN_NOT_READY", 409);
     const [release, policy] = await Promise.all([store.get(tenantId, "release", scan.releaseId), store.get(tenantId, "policy", scan.policyHash)]);
     if (!release || !policy || policy.deprecatedAt || !validPolicy(policy.document) || hash(policy.document) !== scan.policyHash) throw failure("POLICY_OR_RELEASE_UNAVAILABLE", 409);
     // V3 validators re-scan local source themselves (apps/validator/src/v3.ts); prepared and OCI profiles stay on V2.
     if (policy.document.profile !== undefined) throw failure("V3_POLICY_PROFILE_UNSUPPORTED", 409);
-    const context = await client.context(validator);
+    // revokedRound is set in the same transaction as revoked, so one read answers both.
+    const [context, revokedRound] = await Promise.all([client.context(validator), (client.registry as any).revokedRound(scan.releaseId) as Promise<string>]);
     const now = Math.floor(Date.now() / 1000), validFrom = seconds(scan.result.validFrom), validUntil = seconds(scan.result.validUntil);
     if (validUntil <= now || validFrom > now) throw failure("SCAN_VALIDITY_EXPIRED", 409);
     const identity = { releaseId: scan.releaseId, artifactDigest: bytes32(release.artifactDigest), manifestDigest: bytes32(release.manifestDigest), toolSurfaceDigest: release.toolSurfaceHash };
     const round = { releaseId: scan.releaseId, policyHash: scan.policyHash, validFrom, validUntil, validatorSetVersion: context.validatorSetVersion };
+    // REVOKED is terminal: the registry takes a vote only in the round that revoked the release (TERMINAL_RELEASE) and no quarantine
+    // at all. Anything else would revert in the outbox, which cannot tell that revert from an RPC outage and would hold the relayer's
+    // nonce for minutes.
+    if (revokedRound !== ZeroHash && (purpose === "quarantine" || revokedRound !== roundIdOf(round))) throw failure("RELEASE_REVOKED", 409);
     return { scan, identity, round, roundId: roundIdOf(round), nonce: context.nonce, now, operatorVerdict: (scan.result.verdict ?? null) as string | null };
+  };
+  // A relayed vote's own receipt: the VoteRecorded log for exactly this round, validator and evidence, read once per transaction.
+  // It confirms that the operator's transaction cast this vote and gives afterDecision before the indexer reaches the block.
+  const relayedVotes = new Map<string, { afterDecision: boolean } | null>();
+  const relayedVote = async (client: V2Relayer, txHash: string, roundId: string, validator: string, evidenceHash: string) => {
+    const key = `${txHash}:${roundId}:${validator.toLowerCase()}:${evidenceHash}`;
+    if (relayedVotes.has(key)) return relayedVotes.get(key)!;
+    // A failed read shows no relay hash this time (not cached), never a failed vote view.
+    const receipt = await client.provider.getTransactionReceipt(txHash).catch(() => null);
+    if (!receipt) return null;
+    let found: { afterDecision: boolean } | null = null;
+    for (const log of receipt.status === 1 ? receipt.logs : []) {
+      if (log.address.toLowerCase() !== client.registryAddress.toLowerCase()) continue;
+      let event: any;
+      try { event = (client.registry as any).interface.parseLog(log); } catch { continue; }
+      if (event?.name === "VoteRecorded" && event.args.roundId === roundId && String(event.args.validator).toLowerCase() === validator.toLowerCase()
+        && event.args.evidenceHash === evidenceHash) { found = { afterDecision: event.args.afterDecision === true }; break; }
+    }
+    relayedVotes.set(key, found);
+    return found;
   };
   const validatorQuery = (request: any) => {
     const validator = request.query?.validator;
@@ -83,18 +108,35 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
     if (hash(expected) !== hash(bound) || ![0, 1, 2].includes(verdict) || !isBytes32(evidenceHash) || evidenceHash === ZeroHash
       || !Number.isSafeInteger(deadline) || deadline < a.now || deadline > a.round.validUntil || deadline > a.now + 3600) throw failure("ATTESTATION_BINDING_MISMATCH");
     const checked = body.evidence === undefined ? undefined : checkedEvidence(body.evidence, { evidenceHash, validator, release: a.identity, verdict });
+    // actionId names the outbox entry that relays exactly this signed vote, so the votes view can show its transaction before the indexer reaches it.
     const record = { roundId: a.roundId, scanId: a.scan.scanId, releaseId: a.round.releaseId, policyHash: a.round.policyHash, validator, verdict: VERDICTS[verdict], evidenceHash,
+      actionId: chainActionId(client, user.tenantId, "ATTEST", actionPayload),
       operatorVerdict: a.operatorVerdict, agreesWithOperator: a.operatorVerdict === VERDICTS[verdict], receivedAt: new Date().toISOString(),
       evidence: checked ? { consistent: checked.consistent, derivedVerdict: checked.derived.verdict, basis: checked.document.basis,
         findings: findingSummary(checked.document.report), ai: aiSummary(checked.document.ai), file: body.evidence } : null };
-    await store.put(user.tenantId, "validator-vote", `${a.roundId}:${validator.toLowerCase()}`, record, true);
+    // One signed vote in flight per validator, for this round and for its registry nonce (shared by all of its rounds). A restarted
+    // validator re-scans and signs different evidence, or moves on to the next scan before its vote is mined; accepting that would
+    // overwrite the record of the vote still in the outbox, and the second transaction would revert (REPLAY) behind the same relayer
+    // nonce. In flight: not yet COMPLETED or FAILED, or a DEAD_LETTER that kept its signed transaction (an uncertain outcome).
+    // Only actions this relayer can still send count.
+    const inFlight = async (actionId: unknown) => {
+      if (typeof actionId !== "string") return false;
+      const [action] = await chainActions(store, user.tenantId, actionId);
+      return Boolean(action) && action.chainId === client.chainId && action.registryAddress === client.registryAddress.toLowerCase()
+        && (["NEW", "PREPARED", "SUBMITTED"].includes(action.status) || (action.status === "DEAD_LETTER" && Boolean(action.txHash)));
+    };
+    const mine = (await store.query("SELECT document FROM cp_records WHERE tenant_id = ? AND kind = 'validator-vote'", [user.tenantId]))
+      .map((row) => JSON.parse(row.document)).filter((item) => String(item.validator).toLowerCase() === validator.toLowerCase()
+        && (item.roundId === a.roundId || item.nonce === body.payload.nonce));
+    for (const item of mine) if (await inFlight(item.actionId)) throw failure("VOTE_RELAY_PENDING", 409);
+    await store.put(user.tenantId, "validator-vote", `${a.roundId}:${validator.toLowerCase()}`, { ...record, nonce: body.payload.nonce }, true);
     await store.event(user.tenantId, a.round.releaseId, "validator.vote.received", { scanId: a.scan.scanId, validator, roundId: a.roundId, verdict: record.verdict,
       evidenceHash, agreesWithOperator: record.agreesWithOperator, evidenceConsistent: checked?.consistent ?? null });
     return reply.code(202).send({ action: await signedAction(user.tenantId, "ATTEST", actionPayload, a.scan, request.headers.traceparent) });
   });
   api.get("/scans/:scanId/quarantine", async (request) => {
     const user = authenticate(request.headers.authorization); authorize(user, "operator");
-    const validator = validatorQuery(request), a = await announce(user.tenantId, (request.params as any).scanId, validator);
+    const validator = validatorQuery(request), a = await announce(user.tenantId, (request.params as any).scanId, validator, "quarantine");
     // evidenceHash and reasonCode come from the validator's own evidence file, which the relay request must include.
     return { registryVersion: 3, domain: relayer().domain, types: quarantineV3Types, payload: { releaseId: a.round.releaseId, policyHash: a.round.policyHash,
       expiresAt: a.now + 3600, validatorSetVersion: a.round.validatorSetVersion, nonce: a.nonce, deadline: a.now + 600 } };
@@ -107,7 +149,7 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
     const actionPayload = { quarantine: body.payload, signature: body.signature };
     const previous = await chainActions(store, user.tenantId, chainActionId(client, user.tenantId, "QUARANTINE", actionPayload));
     if (previous[0]) return reply.code(202).send({ action: previous[0], idempotent: true });
-    const validator = await client.validateSignature(body.payload, body.signature, true), a = await announce(user.tenantId, body.scanId, validator), q = body.payload;
+    const validator = await client.validateSignature(body.payload, body.signature, true), a = await announce(user.tenantId, body.scanId, validator, "quarantine"), q = body.payload;
     const { document } = checkedEvidence(body.evidence, { evidenceHash: q.evidenceHash, validator, release: a.identity });
     const reason = quarantineReason(document.report);
     if (!reason || id(reason) !== q.reasonCode || q.releaseId !== a.round.releaseId || q.policyHash !== a.round.policyHash
@@ -132,8 +174,10 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
     if (!registered || policyHash === null) return { registryVersion: 3, releaseId, policyHash, registered, rounds: [], quarantines: [] };
     const validatorRegistry = new Contract(await registry.validators(), ["function version() view returns(uint32)", "function validators(uint256) view returns(address)"], client.provider);
     const [version, ...members] = await Promise.all([validatorRegistry.version(), ...[0, 1, 2].map((index) => validatorRegistry.validators(index))]) as [bigint, ...string[]];
-    const [decision, needsReview, live, revokedRound, quarantineUntil] = await Promise.all([registry.getDecision(releaseId, policyHash), registry.needsReview(releaseId, policyHash),
-      registry.currentRound(releaseId, policyHash), registry.revokedRound(releaseId), registry.quarantineUntil(releaseId)]);
+    // Each validator may quarantine a release once ever (QUARANTINE_USED); lastQuarantineAt 0 means it never did, in any round.
+    const [decision, needsReview, live, revokedRound, quarantineUntil, ...usedAt] = await Promise.all([registry.getDecision(releaseId, policyHash), registry.needsReview(releaseId, policyHash),
+      registry.currentRound(releaseId, policyHash), registry.revokedRound(releaseId), registry.quarantineUntil(releaseId), ...members.map((member) => registry.lastQuarantineAt(releaseId, member))]);
+    const quarantineUsedAt = Object.fromEntries(members.map((member, index) => [member.toLowerCase(), Number(usedAt[index])]));
     const rounds = new Map<string, string | null>();
     for (const scan of scans.filter((scan) => scan.policyHash === policyHash)) rounds.set(roundIdOf({ releaseId, policyHash, validFrom: seconds(scan.result!.validFrom),
       validUntil: seconds(scan.result!.validUntil), validatorSetVersion: Number(version) }), scan.scanId);
@@ -152,9 +196,19 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
         const stored = vote.cast ? await store.get(user.tenantId, "validator-vote", key) : undefined;
         const relayed = stored !== undefined && stored.evidenceHash === vote.evidenceHash ? stored : undefined;
         const evidence = relayed?.evidence ? (({ file: _file, ...summary }) => summary)(relayed.evidence) : null;
+        // Until the indexer reaches the block (on Base Sepolia it can lag for hours), the operator's own relay names the transaction,
+        // but only a COMPLETED action on this chain and registry whose receipt carries this exact vote (VoteRecorded for this round,
+        // validator and evidence). txSource says which of the two the hash came from.
+        const indexedVote = indexed.get(key), indexedTx = indexedVote?.txHash ?? null;
+        const relayAction = !indexedTx && typeof relayed?.actionId === "string" ? (await chainActions(store, user.tenantId, relayed.actionId))[0] : undefined;
+        const candidate = relayAction?.status === "COMPLETED" && relayAction.kind === "ATTEST" && relayAction.chainId === client.chainId
+          && relayAction.registryAddress === client.registryAddress.toLowerCase() && isBytes32(relayAction.txHash) ? relayAction.txHash as string : null;
+        const fromRelay = candidate ? await relayedVote(client, candidate, roundId, validator, vote.evidenceHash) : null;
+        const relayTx = fromRelay ? candidate : null;
         return { validator, cast: vote.cast, verdict: vote.cast ? VERDICTS[Number(vote.verdict)] : null, evidenceHash: vote.cast ? vote.evidenceHash : null,
           agreesWithOperator: relayed ? relayed.agreesWithOperator : null, evidence,
-          afterDecision: indexed.get(key)?.afterDecision ?? null, txHash: indexed.get(key)?.txHash ?? null };
+          afterDecision: indexedVote?.afterDecision ?? fromRelay?.afterDecision ?? null, txHash: indexedTx ?? relayTx,
+          txSource: indexedTx ? "INDEXER" : relayTx ? "OPERATOR_RELAY" : null };
       }));
       views.push({ roundId, scanId, live: roundId === live, validFrom: Number(round.validFrom), validUntil: Number(round.validUntil), validatorSetVersion: Number(round.validatorSetVersion),
         outcome: ROUND_OUTCOMES[Number(round.outcome)], approvals: Number(round.approvals), rejections: Number(round.rejections), abstentions: Number(round.abstentions),
@@ -168,7 +222,7 @@ export function registerV3VoteRoutes(api: FastifyInstance, store: ControlStore, 
       return { validator: event.validator, reason: REASON_NAMES[event.reasonCode] ?? null, evidenceHash: event.evidenceHash, expiresAt: Number(event.expiresAt), txHash: row.transaction_hash };
     });
     return { registryVersion: 3, releaseId, policyHash, registered: true, status: STATUSES[Number(decision.status)], decisionRound: decision.reportRoot === ZeroHash ? null : decision.reportRoot,
-      needsReview, quarantineUntil: Number(quarantineUntil) || null, validatorSetVersion: Number(version), validators: members, rounds: views, quarantines };
+      needsReview, quarantineUntil: Number(quarantineUntil) || null, validatorSetVersion: Number(version), validators: members, rounds: views, quarantines, quarantineUsedAt };
   });
   // The exact bytes behind a relayed evidenceHash, so anyone can re-hash them.
   api.get("/releases/:releaseId/votes/:roundId/:validator/evidence", async (request, reply) => {

@@ -28,7 +28,7 @@ export function VotePills({ votes, round }: { votes?: V3Votes | null; round?: V3
   })}</span>;
 }
 
-const Tx = ({ tx }: { tx: NonNullable<Cell["tx"]> }) => <span>거래 {tx.href ? <a href={tx.href} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code title={tx.hash}>{short(tx.hash)}</code>}</span>;
+const Tx = ({ tx }: { tx: NonNullable<Cell["tx"]> }) => <span>{tx.label ?? "거래"} {tx.href ? <a href={tx.href} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code title={tx.hash}>{short(tx.hash)}</code>}</span>;
 // Shortened hashes stay on one line (<code>, nowrap); long codes such as CANARY_EXFILTRATION may break after "_" only, and a
 // " · " separated part never breaks inside itself unless it has to.
 const HASH = /((?:0x|sha256:)[0-9a-fA-F]{3,}…[0-9a-fA-F]{4})/;
@@ -93,9 +93,10 @@ export function V3FlowMap({ flow, compact = false }: { flow: FlowView; compact?:
       </div>
       <div className="v3-col"><StepView step={decision} extra={{ "data-decision": flow.outcome ?? "NONE" }} /><StepView step={gateway} extra={{ "data-gateway": flow.gateway ?? "NONE" }} /></div>
     </div>
-    <p className="v3-note">{TEAM_RUN_NOTE}<br />{AI_WITNESS_NOTE}</p>
+    <p className="v3-note">{TEAM_RUN_NOTE}<br />{AI_WITNESS_NOTE}{flow.lanes.some((lane) => lane.signed.tx?.label) && ` ${RELAY_TX_NOTE}`}</p>
   </div>;
 }
+const RELAY_TX_NOTE = "중계로 표시된 해시는 인덱서가 읽기 전, 운영사가 보낸 그 표의 거래를 성공 영수증으로 확인한 것입니다.";
 
 /** The four result cards. Only the current chain state plus an ALLOW from the API makes the verdict card green. */
 export function VerdictCards({ votes, release, admission, round, loading = false, votesError = null }: { votes?: V3Votes | null; release?: Release | null; admission?: Admission | null; round?: V3Round; loading?: boolean; votesError?: string | null }) {

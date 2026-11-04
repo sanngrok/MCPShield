@@ -94,6 +94,11 @@ test("V3 votes show each validator's own verdict and evidence, dissent, late vot
   const html = renderToStaticMarkup(<VotesV3View votes={view({})} operatorVerdicts={{ [scan.scanId]: "PASS" }} />);
   for (const value of ["승인 · 2/3 PASS 달성", "현재 판정 근거", "PASS 2 · FAIL 0 · 보류 1", "운영사 검사 권고: PASS", "운영사 검사와 다른 판정 · 그대로 기록", "결론 뒤에 들어온 표", "증거 파일 미제출 · 해시만 체인에 있음", "증거 파일과 판정 일치"]) assert.ok(html.includes(value), value);
   assert.equal(html.split("운영사 검사와 다른 판정").length - 1, 1, "only the ABSTAIN vote differs from a PASS recommendation");
+  assert.doesNotMatch(html, /운영사 중계 거래/, "an indexed hash carries no relay note");
+  // Before the indexer reaches it, a relayed vote's hash says where it came from; a vote with no known transaction still says so.
+  const relayedRound: V3Round = { ...round, votes: [vote(a, "PASS", { txSource: "OPERATOR_RELAY" }), vote(b, "PASS", { txHash: null, afterDecision: null }), round.votes[2]] };
+  const relayedHtml = renderToStaticMarkup(<VotesV3View votes={view({ rounds: [relayedRound] })} operatorVerdicts={{ [scan.scanId]: "PASS" }} />);
+  assert.equal(relayedHtml.split("운영사 중계 거래 · 영수증 확인 · 인덱서 관측 전").length - 1, 1); assert.match(relayedHtml, /인덱서 관측 전/);
   // An operator scan without a conclusion (no Docker sandbox) is a reference only: no vote is called a dissent against it.
   const inconclusive = renderToStaticMarkup(<VotesV3View votes={view({})} operatorVerdicts={{ [scan.scanId]: "ABSTAIN" }} />);
   assert.match(inconclusive, /결론이 없는 참고 값이라 표와 비교하지 않음/); assert.doesNotMatch(inconclusive, /운영사 검사와 다른 판정/);
