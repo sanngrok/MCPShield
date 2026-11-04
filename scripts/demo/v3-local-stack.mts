@@ -13,7 +13,7 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
 import ganache from "ganache";
-import { Wallet } from "ethers";
+import { Contract, Wallet, ZeroHash } from "ethers";
 import { compileReleaseRegistry } from "../../contracts/scripts/compile.js";
 import { deployV2 } from "../../contracts/scripts/deploy-v2.js";
 import { buildApp } from "../../apps/api/src/app.js";
@@ -175,6 +175,19 @@ loop("인덱서", 3000, async () => {
 await enqueueChainAction(store, relayer, stack.tenantId, "PUBLISH_POLICY", { policyHash });
 
 const reader: any = createReleaseRegistryV3(chain.registry, relayer.provider);
+// REVOKED is terminal: the registry takes a late vote only in the round that revoked the release (TERMINAL_RELEASE). A vote for a
+// later scan's round reverts, and the operator's outbox cannot tell that revert from an RPC outage (the hardened transport never
+// passes JSON-RPC error bodies on), so it would retry for minutes while every later vote waits behind the same relayer nonce.
+// revokedRound is set in the same transaction as revoked, so one read answers both (two reads may hit nodes at different heights).
+// The operator API refuses such a round as well (RELEASE_REVOKED); skipping here saves the validator its scan and AI call.
+const terminalRound = async (scan: any) => {
+  const revokedRound: string = await reader.revokedRound(scan.releaseId);
+  if (revokedRound === ZeroHash) return false;
+  const validators = new Contract(await reader.validators(), ["function version() view returns(uint32)"], relayer.provider);
+  const round = await reader.roundIdOf(scan.releaseId, scan.policyHash, Math.floor(Date.parse(scan.result.validFrom) / 1000),
+    Math.floor(Date.parse(scan.result.validUntil) / 1000), Number(await validators.version()));
+  return round !== revokedRound;
+};
 for (const [index, name] of NAMES.entries()) {
   const who = `검증자 ${name}`, token = stack.validatorTokens[index];
   // Each validator keeps its own copy of the fixtures; identity is recomputed from those bytes, never taken from the operator.
@@ -184,15 +197,31 @@ for (const [index, name] of NAMES.entries()) {
     const local = await resolveArtifact({ sourceType: "local", locator: dir });
     return { dir, label: basename(source), identity: [bytes32(local.artifactDigest), bytes32(local.manifestDigest), bytes32(local.toolSurfaceHash)].join() };
   }));
-  const handled = new Set<string>();
+  const handled = new Set<string>(), retries = new Map<string, number>(), retryAt = new Map<string, number>();
+  const address = new Wallet(chain.validatorKeys[index]).address.toLowerCase();
+  // Did the operator receive this validator's vote for the scan? An unreadable store counts as yes, so nothing is signed twice.
+  const received = (scan: any) => store.events(stack.tenantId, scan.releaseId).then((events) => events.some((event) => event.eventName === "validator.vote.received"
+    && event.payload?.scanId === scan.scanId && String(event.payload?.validator).toLowerCase() === address), () => true);
   loop(who, 2000, async () => {
     const response = await fetch(`${apiUrl}/v1/scans`, { headers: { authorization: `Bearer ${token}` } });
     if (!response.ok) throw new Error(`VALIDATOR_API_HTTP_${response.status}`);
     const scans = ((await response.json()).items as any[]).filter((scan) => scan.status === "COMPLETED" && scan.policyHash === policyHash && !handled.has(scan.scanId)).reverse();
     for (const scan of scans) {
       if (!accepting) return;
+      const due = retryAt.get(scan.scanId);
+      if (due !== undefined) {
+        if (Date.now() < due) continue;
+        retryAt.delete(scan.scanId);
+        // A POST that timed out on this side may still have reached the operator: look again, well after the handler would finish.
+        if (await received(scan)) { handled.add(scan.scanId); log(who, `검사 ${scan.scanId.slice(0, 8)} · 운영사가 이미 표를 받음 · 다시 서명하지 않음`); continue; }
+      }
       const onChain = await reader.releases(scan.releaseId);
       if (!onChain.exists) continue; // not registered on chain yet: look again on the next pass
+      if (await terminalRound(scan)) {
+        handled.add(scan.scanId);
+        log(who, `검사 ${scan.scanId.slice(0, 8)} · 이미 폐기된 릴리스의 새 라운드라 투표하지 않음 (체인이 받지 않음)`);
+        continue;
+      }
       // The round starts at the operator scan's validFrom (wall clock); a validator refuses a window the chain head has not
       // reached yet (ROUND_WINDOW_INVALID) and would never retry. Blocks come every second or two: look again on the next pass.
       if (Math.floor(Date.parse(scan.result?.validFrom) / 1000) > Number((await relayer.provider.getBlock("latest"))?.timestamp ?? 0)) continue;
@@ -210,7 +239,21 @@ for (const [index, name] of NAMES.entries()) {
           const txs = run.transactions.map((tx: any) => `${tx.kind === "QUARANTINE" ? "긴급 격리" : "투표"} ${short(tx.txHash)}`).join(" · ");
           const witness = run.ai ? ` · AI 증인 ${run.ai.model} ${run.ai.status === "COMPLETED" ? "응답함" : "응답 없음"}` : "";
           log(who, `${copy.label} · 자기 검사 ${run.verdict}${run.basis.length ? ` (${run.basis.join(", ")})` : ""}${witness} · 증거 ${short(run.evidenceHash)} · ${run.skipped === "ALREADY_VOTED" ? "이미 투표함" : txs}`);
-        } catch (error) { log(who, `${copy.label} · 투표 실패 · ${code(error)}`); }
+        } catch (error) {
+          log(who, `${copy.label} · 투표 실패 · ${code(error)}`);
+          // A public RPC that briefly refuses reads fails the vote before the operator has it (the API answers HTTP 400 for
+          // RPC_TRUST_REJECTED). Such a scan gets up to three more tries, 45 s apart. Once the operator has received this validator's
+          // vote for the scan it is never retried (checked now and again before the retry): a second run would sign a different
+          // evidence file, and the API refuses it while the first is in the outbox (VOTE_RELAY_PENDING).
+          // Only transport-shaped failures are retried; a 409 (expired window, revoked release, vote pending) stays final.
+          const transient = /^(VALIDATOR_API_HTTP_(400|5\d\d)|RPC_TRUST_REJECTED|SERVICE_TRANSPORT_UNAVAILABLE|UNEXPECTED_ERROR)$/.test(code(error));
+          const tried = (retries.get(scan.scanId) ?? 0) + 1;
+          if (transient && await received(scan)) log(who, `${copy.label} · 운영사가 표를 받음 · 체인 기록은 운영사 전송기가 마무리`);
+          else if (transient && tried <= 3) {
+            retries.set(scan.scanId, tried); retryAt.set(scan.scanId, Date.now() + 45_000); handled.delete(scan.scanId);
+            log(who, `${copy.label} · 45초 뒤 다시 시도 (${tried}/3)`);
+          }
+        }
       } finally { mine.done(); }
     }
   }, () => accepting, validatorLoops);
@@ -266,24 +309,32 @@ if (values.smoke || values.seed) {
     throw new Error(`SMOKE_TIMEOUT:${what}`);
   };
   try {
-    const outcomes: Record<string, string> = {};
+    const outcomes: Record<string, string> = {}, revokedEarlier: string[] = [];
     for (const [version, expected] of [["1.0.0", "VERIFIED"], ["1.0.1", "REVOKED"]] as const) {
       const release = (await post("/v1/releases/resolve", { sourceType: "fixture", locator: `mail-mcp-${version}` })).release;
       await post(`/v1/releases/${release.releaseId}/register`);
       await waitFor(`register ${version}`, async () => (await reader.releases(release.releaseId)).exists || undefined);
+      // On a deployment that revoked it before (F604), this run's validators cast no vote on it: the check below then reads the
+      // earlier revoking round, and the log says so instead of implying this run revoked it.
+      if (await reader.revokedRound(release.releaseId) !== ZeroHash) revokedEarlier.push(version);
       // A fresh key per run: with a reused --data directory a fixed key would return yesterday's expired scan.
-      await post("/v1/scans", { releaseId: release.releaseId, policyHash }, { "idempotency-key": `smoke-${version}-${randomBytes(8).toString("hex")}` });
+      const { scan } = await post("/v1/scans", { releaseId: release.releaseId, policyHash }, { "idempotency-key": `smoke-${version}-${randomBytes(8).toString("hex")}` });
+      // This run's round must carry the three votes; an earlier approval or revocation on a reused --data or deployment does not
+      // count, except a revocation from before this run (the validators cast nothing on a revoked release).
+      const thisRound = (body: any) => body.rounds.find((round: any) => (revokedEarlier.includes(version) ? round.roundId === body.decisionRound : round.scanId === scan.scanId)
+        && round.votes.filter((vote: any) => vote.cast).length === 3);
       const view = await waitFor(`votes ${version}`, async () => {
         const response = await app.inject({ url: `/v1/releases/${release.releaseId}/votes`, headers: auth }), body = response.json();
-        return response.statusCode === 200 && body.status === expected && body.rounds.some((round: any) => round.votes.filter((vote: any) => vote.cast).length === 3) ? body : undefined;
+        return response.statusCode === 200 && body.status === expected && thisRound(body) ? body : undefined;
       });
       const admission = (await post("/v1/admission/check", { releaseId: release.releaseId, artifactDigest: release.artifactDigest, toolSurfaceHash: release.toolSurfaceHash,
         policyHash, mode: "strict", operationClass: "READ_PRIVATE" })).decision;
-      outcomes[version] = `${view.status} · 실행 판정 ${admission}`;
-      log("점검", `mail-mcp ${version} · ${outcomes[version]} · ${view.rounds[0].votes.map((vote: any) => `${short(vote.validator)} ${vote.verdict}`).join(", ")}`);
+      outcomes[version] = `${view.status}${revokedEarlier.includes(version) ? " (이번 실행 전에 이미 폐기됨 · 이번 실행의 표 없음, 아래는 폐기 라운드의 표)" : ""} · 실행 판정 ${admission}`;
+      log("점검", `mail-mcp ${version} · ${outcomes[version]} · ${thisRound(view).votes.map((vote: any) => `${short(vote.validator)} ${vote.verdict}`).join(", ")}`);
       if (admission !== (expected === "VERIFIED" ? "ALLOW" : "BLOCK")) throw new Error(`SMOKE_ADMISSION_MISMATCH:${version}`);
     }
-    log("점검", "통과 · 1.0.0 승인과 실행 허용, 1.0.1 폐기와 실행 차단을 확인했습니다.");
+    log("점검", revokedEarlier.includes("1.0.1") ? "통과 · 1.0.0 승인과 실행 허용, 그리고 이전에 폐기된 1.0.1의 실행 차단을 확인했습니다."
+      : "통과 · 1.0.0 승인과 실행 허용, 1.0.1 폐기와 실행 차단을 확인했습니다.");
     if (values.smoke) await shutdown(0);
     else log("점검", `계속 실행합니다 · 두 회사 Gateway 장면: node --import tsx scripts/demo/gateway-scene.mts --stack "${dataDir}"`);
   } catch (error) { log("점검", `실패 · ${code(error)}`); await shutdown(1); }
