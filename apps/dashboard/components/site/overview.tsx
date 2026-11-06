@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { Admission } from '../release-workflow'
 import { LanguageSwitcher } from './i18n'
 import { Sidebar } from './workspace'
 import { checkAdmission, useBoard, useSession } from './v3-api'
 import { AI_WITNESS_NOTE, TEAM_RUN_NOTE, chainIdOf, chainLabel, chainState, consensusCard, decidedOnChain, flowView, shownRound, type LaneView } from './v3-model'
 import { LoginRequired, V3FlowMap } from './v3-views'
+import { HOW_SCENES } from './how-scenes'
 
-// How MCPShield works, in the order of the team's intro film; the pictures are stills from that film (app/(site)/how).
+// How MCPShield works, in the order of the team's intro film; each step has a looping scene drawn in how-scenes.tsx.
 const HOW: { key: string; no: string; kicker: string; title: string; text: string; wide?: boolean; flip?: boolean }[] = [
   { key: 'fingerprint', no: '01', kicker: 'THE EXACT RELEASE', title: '이름이 아닌, 배포본의 지문.', text: '새 버전의 파일 · 매니페스트 · 도구 목록 해시를 체인에 고정합니다. 이름이 같아도 바이트가 다르면 다른 릴리스입니다.' },
   { key: 'layers', no: '02', kicker: 'INSIDE EACH VALIDATOR', title: 'AI를 더한, 세 겹의 검증.', text: '코드 규칙 검사 · 의미 분석 · Sandbox 실행으로 증거를 교차 확인합니다. AI는 증인으로만 참여하고, 의심되면 통과를 보류할 뿐입니다.', wide: true },
@@ -72,7 +73,7 @@ export function Overview() {
           <ol className="how-steps" ref={steps}>{HOW.map((step) => <li className={`how-step ${step.wide ? 'banner' : step.flip ? 'flip' : ''}`} key={step.key}>
             <span className="how-rail"><i>{step.no}</i></span>
             <div className="how-body"><small>{step.kicker}</small><b>{step.title}</b><p>{step.text}</p></div>
-            <div className={`how-img ${step.key}`} role="img" aria-label={step.title} />
+            <div className="how-img">{React.createElement(HOW_SCENES[step.key])}</div>
           </li>)}</ol>
         </section>
 
