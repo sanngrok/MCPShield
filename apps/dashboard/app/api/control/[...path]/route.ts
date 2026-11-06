@@ -42,7 +42,9 @@ function controlOrigins(request: NextRequest) {
   const api = new URL(process.env.MCPSHIELD_API_URL ?? "http://127.0.0.1:3001");
   const allowedHttp = new Set([...loopback, ...(process.env.MCPSHIELD_API_HTTP_HOSTS ?? "").split(",").map((host) => host.trim()).filter(Boolean)]);
   if (api.username || api.password || api.search || api.hash || (api.protocol !== "https:" && !(api.protocol === "http:" && allowedHttp.has(api.hostname)))) throw new Error("API_HTTPS_REQUIRED");
-  return { publicOrigin: publicUrl.origin, secure: publicUrl.protocol === "https:", api };
+  // The local demo stack hands the dashboard its admin token so the demo needs no sign-in; honoured only on loopback HTTP.
+  const demoToken = localDemo ? process.env.MCPSHIELD_DEMO_CONTROL_TOKEN : undefined;
+  return { publicOrigin: publicUrl.origin, secure: publicUrl.protocol === "https:", api, demoToken };
 }
 
 async function handle(request: NextRequest, context: Context) {
@@ -61,7 +63,7 @@ async function handle(request: NextRequest, context: Context) {
   }
   const login = route === "session" && request.method === "POST";
   if (!login && !routes[request.method as keyof typeof routes]?.some((pattern) => pattern.test(route))) return json({ error: "Unknown control route" }, 404);
-  let token = request.cookies.get(COOKIE)?.value;
+  let token = request.cookies.get(COOKIE)?.value ?? origins.demoToken;
   let body: string | undefined;
   if (mutating) {
     if (!request.headers.get("content-type")?.startsWith("application/json")) return json({ error: "JSON required" }, 415);

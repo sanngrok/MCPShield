@@ -264,6 +264,7 @@ if (!values["no-dashboard"] && !values.smoke) {
   const port = values["dashboard-port"]!;
   dashboard = spawn(process.execPath, [join(repo, "node_modules/next/dist/bin/next"), "dev", "-p", port, "-H", "127.0.0.1"], { cwd: join(repo, "apps/dashboard"), stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, MCPSHIELD_API_URL: apiUrl, MCPSHIELD_PUBLIC_ORIGIN: `http://127.0.0.1:${port}`, MCPSHIELD_CONTROL_ALLOW_LOOPBACK_HTTP: "true",
+      MCPSHIELD_DEMO_CONTROL_TOKEN: stack.adminToken,
       ...(baseSepolia ? { MCPSHIELD_V3_RPC_URL: chain.rpc, MCPSHIELD_V3_CHAIN_ID: String(chain.chainId), MCPSHIELD_V3_REGISTRY: chain.registry, MCPSHIELD_V3_POLICY_REGISTRY: chain.policyRegistry } : {}) } });
   dashboard.stdout?.on("data", (chunk: Buffer) => { if (/ready|error/i.test(chunk.toString())) log("대시보드", chunk.toString().trim().split("\n")[0].slice(0, 160)); });
   dashboard.stderr?.on("data", (chunk: Buffer) => { if (/error/i.test(chunk.toString())) log("대시보드", "오류 출력이 있습니다. --no-dashboard로 따로 띄워 확인하세요."); });
@@ -288,7 +289,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => 
 console.log([
   "", `MCPShield V3 로컬 시연 스택 · ${chain.label}`,
   `  ReleaseRegistryV3 ${chain.registry}`, `  운영 API ${apiUrl} (검증자 표 중계·인덱서 포함)`,
-  ...(dashboard ? [`  대시보드 http://127.0.0.1:${values["dashboard-port"]}/console · 로그인 토큰은 ${stackFile} 의 adminToken`] : []),
+  ...(dashboard ? [`  대시보드 http://127.0.0.1:${values["dashboard-port"]} · 로그인 없이 관리자(admin)로 연결됩니다 (토큰은 ${stackFile} 의 adminToken)`] : []),
   `  검증자 A·B·C: 각자 사본을 검사하고 자기 증거에 서명해 운영사 중계로 투표합니다. C가 긴급 격리를 맡고, 순서는 ${ORDER.join(" → ")}입니다.`,
   `  AI 증인: ${aiLabel.length ? aiLabel.join(", ") : "없음 (규칙과 미끼 시험 환경만)"}`,
   "  진행: 새 릴리스 등록(fixture mail-mcp-1.0.0) → 관리자 온체인 등록 → 검사 요청 → 검증자 투표 → 실행 판정 조회. 이어서 mail-mcp-1.0.1.",

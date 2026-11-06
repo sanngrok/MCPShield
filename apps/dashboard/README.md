@@ -5,7 +5,7 @@ npm.cmd ci
 npm.cmd run dev --workspace @mcpshield/dashboard
 ```
 
-For the V3 rehearsal stack (operator API, three validators, local Ganache and this dashboard on one machine) run `npm run demo:v3 -- --seed` from the repository root, sign in at `http://127.0.0.1:3000/console` with the `adminToken` from the stack's `stack-local.json`, and use the product site below. Always open `127.0.0.1`, not `localhost`: write requests are accepted only from the configured public origin.
+For the V3 rehearsal stack (operator API, three validators, local Ganache and this dashboard on one machine) run `npm run demo:v3 -- --seed` from the repository root, open `http://127.0.0.1:3000/` and use the product site below. The stack passes its `adminToken` to the dashboard as `MCPSHIELD_DEMO_CONTROL_TOKEN`, so there is no sign-in: the `/api/control` proxy uses it when no session cookie is present, and only when the public origin is loopback HTTP with `MCPSHIELD_CONTROL_ALLOW_LOOPBACK_HTTP=true`. The operator API still checks the token on every request. Always open `127.0.0.1`, not `localhost`: write requests are accepted only from the configured public origin.
 
 `app/api/live` and `app/api/replay` still serve the V1 Backend snapshot (`MCPSHIELD_API_URL`, `MCPSHIELD_REPLAY_FILE`, `MCPSHIELD_GATEWAY_EVIDENCE_DIR`, optional `MCPSHIELD_EXPLORER_URL`) for the release-image smoke check and CI; no product screen reads them any more. `lib/backend-client.ts` is the server-only boundary for those V1 Backend APIs, so admin/scanner credentials are never bundled into the client.
 
