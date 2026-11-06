@@ -82,6 +82,10 @@ function laneChip(lane: LaneView): { kind: string; label: string } {
   const active = [lane.rescan, lane.signed].some((cell) => cell.state !== "pending");
   return active ? { kind: "running", label: "검증 중" } : { kind: "pending", label: "대기" };
 }
+/** One dot per validator (its vote in the shown round) and one for a release's chain status. */
+export const laneDotKind = (lane: LaneView): DotKind => lane.voteKey === "PASS" ? "pass" : lane.voteKey === "FAIL" ? "fail" : lane.voteKey === "ABSTAIN" ? "review"
+  : [lane.rescan, lane.signed].some((cell) => cell.state !== "pending") ? "running" : "pending";
+export const statusDotKind = (status: string | null): DotKind => status === "VERIFIED" ? "pass" : status === "REVOKED" || status === "QUARANTINED" ? "fail" : "pending";
 const stageKind = (step: Step): DotKind => step.state === "failed" ? "fail" : step.state === "running" ? "running" : step.state === "pending" ? "pending"
   : step.tone === "fail" ? "fail" : step.tone === "review" ? "review" : "pass";
 

@@ -409,3 +409,34 @@ body,.workspace{font-family:'Sora','IBM Plex Sans KR','Malgun Gothic','Apple SD 
 @keyframes sc-stop{0%,100%{stroke-opacity:.6}50%{stroke-opacity:1}}
 @keyframes sc-ripple{0%,78%{opacity:0;transform:scale(.6)}84%{opacity:.9}100%{opacity:0;transform:scale(2.2)}}
 @media(prefers-reduced-motion:reduce){.sc *{animation:none!important}.sc text.sc-hash,.sc-sign{opacity:1}}
+
+/* /security-scan: pick one of the two fixture versions as a card, then start; the selected version's state sits beside it. */
+.pick-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:12px;align-items:start}
+.pick-panel{padding:26px 26px 24px}
+.pick-head h2{font:600 22px 'IBM Plex Sans KR',sans-serif;margin:0}.pick-head p{margin:8px 0 0;font-size:14px;color:#a0a7a1}
+.pick-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+.pick-card{position:relative;text-align:left;border:1px solid #2b312c;background:#0b0e0c;color:inherit;padding:20px 20px 18px;cursor:pointer;display:flex;flex-direction:column;gap:10px;font:inherit;transition:border-color .2s ease,background-color .2s ease,box-shadow .2s ease}
+.pick-card:hover:not(:disabled){border-color:#5d6a55}
+.pick-card.selected{border-color:#c6ff2e;background:linear-gradient(160deg,rgba(198,255,46,.07),transparent 60%),#0b0e0c;box-shadow:0 0 0 1px #c6ff2e,0 0 28px rgba(198,255,46,.08)}
+.pick-card.selected::after{content:'✓';position:absolute;top:16px;right:16px;width:22px;height:22px;border-radius:50%;background:#c6ff2e;color:#0a0d0a;display:grid;place-items:center;font-size:13px;font-weight:700}
+.pick-card:disabled{cursor:default;opacity:.7}
+.pick-tag{align-self:flex-start;font-size:12px;letter-spacing:.06em;padding:4px 9px;border:1px solid #34452e;color:#90bd79;background:#0e150d}
+.pick-card.risky .pick-tag{border-color:#5a3030;color:#ff7b7b;background:#180f0f}
+.pick-card b{font:600 20px 'Sora','IBM Plex Sans KR',sans-serif}.pick-card b code{font:500 20px var(--mono);color:#c6ff2e;margin-left:8px}
+.pick-card p{margin:0;font:400 13px/1.6 'IBM Plex Sans KR',sans-serif;color:#a0a7a1;min-height:42px}
+.pick-state{display:flex;align-items:center;gap:8px;font-size:13px;color:#cdd2cc;padding-top:12px;border-top:1px solid #202421}
+.pick-facts{display:grid;grid-template-columns:1.4fr 1fr 1fr;margin:20px 0 0;border-block:1px solid #232824;padding:14px 0}
+.pick-facts div{padding-left:14px;border-left:1px solid #242925;min-width:0}.pick-facts div:first-child{padding-left:0;border:0}
+.pick-facts dt{font-size:12px;color:#9aa29b}.pick-facts dd{margin:5px 0 0;font:13px var(--mono);color:#cdd2cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:20px}
+.pick-actions p{margin:0;font-size:12px;line-height:1.6;color:#8e968f;max-width:480px}
+.pick-actions .ws-button{height:46px;padding:0 22px;font-size:14px;white-space:nowrap}
+.pick-panel .scan-error{margin:14px 0 0}
+.pick-side{display:flex;flex-direction:column}
+.pick-side-head{padding:24px 22px 18px}.pick-side-head small{font-size:12px;letter-spacing:.1em;color:#9aa29b}
+.pick-side-head h3{display:flex;align-items:center;gap:10px;font:600 26px 'IBM Plex Sans KR',sans-serif;margin:10px 0 6px}.pick-side-head h3.pass{color:#7cff88}.pick-side-head h3.fail{color:#ff6868}
+.pick-side-head span{font-size:13px;color:#a0a7a1}
+.pick-note{margin:0;padding:12px 22px;font-size:12px;line-height:1.6;color:#8e968f;border-top:1px solid #202421}
+.pick-side a.result-link{display:flex;margin:6px 22px 20px}
+@media(max-width:1100px){.pick-layout{grid-template-columns:1fr}}
+@media(max-width:640px){.pick-cards{grid-template-columns:1fr}.pick-facts{grid-template-columns:1fr;row-gap:10px}.pick-facts div{padding-left:0;border:0}.pick-actions{flex-direction:column;align-items:stretch}}

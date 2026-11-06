@@ -5,8 +5,8 @@ import type { Admission } from '../release-workflow'
 import { LanguageSwitcher } from './i18n'
 import { Sidebar } from './workspace'
 import { checkAdmission, useBoard, useSession } from './v3-api'
-import { AI_WITNESS_NOTE, TEAM_RUN_NOTE, chainIdOf, chainLabel, chainState, consensusCard, decidedOnChain, flowView, shownRound, type LaneView } from './v3-model'
-import { LoginRequired, V3FlowMap } from './v3-views'
+import { AI_WITNESS_NOTE, TEAM_RUN_NOTE, chainIdOf, chainLabel, chainState, consensusCard, decidedOnChain, flowView, shownRound } from './v3-model'
+import { LoginRequired, V3FlowMap, laneDotKind, statusDotKind } from './v3-views'
 import { HOW_SCENES } from './how-scenes'
 
 // How MCPShield works, in the order of the team's intro film; each step has a looping scene drawn in how-scenes.tsx.
@@ -34,10 +34,6 @@ function useReveal() {
   }, [])
   return ref
 }
-
-const laneKind = (lane: LaneView) => lane.voteKey === 'PASS' ? 'pass' : lane.voteKey === 'FAIL' ? 'fail' : lane.voteKey === 'ABSTAIN' ? 'review'
-  : [lane.rescan, lane.signed].some((cell) => cell.state !== 'pending') ? 'running' : 'pending'
-const statusKind = (status: string | null) => status === 'VERIFIED' ? 'pass' : status === 'REVOKED' || status === 'QUARANTINED' ? 'fail' : 'pending'
 
 // How it works, then the current chain state per release read now from the V3 operator API and the chain. No sample or replayed data.
 export function Overview() {
@@ -89,12 +85,12 @@ export function Overview() {
               const state = chainState({ votes, release, error: votesError })
               const decided = decidedOnChain(state.status, round)
               const flow = flowView({ release, votes, round, actions: board.actions, admission, votesError, scan: board.scans.find((item) => item.scanId === round?.scanId) })
-              const kind = statusKind(state.status)
+              const kind = statusDotKind(state.status)
               const pendingGateway = votesError ? '조회 안 함 (체인 조회 실패)' : decided ? '조회 중' : '결론 전 · 실행 차단'
               return <article className={`panel ov-card ${kind}`} key={release.releaseId} data-release-status={state.status ?? 'NONE'} data-raw>
                 <header><div><small>{release.legacyReleaseId}</small><h3><i className={`fx-dot ${kind}`} />{state.text}{state.status && <code>{state.status}</code>}</h3></div><a className="v3-link" href={`/scan-results?release=${release.releaseId}`}>결과 보기 <span>↗</span></a></header>
                 {votesError ? <p className="v3-empty">체인 투표를 읽지 못했습니다. 상태를 표시하지 않으며 승인으로 간주하지 않습니다. {votesError}</p> : <>
-                  <div className="ov-row"><span>검증자</span><span className="ov-lanes">{flow.lanes.map((lane) => <span key={lane.lane}><b>{lane.lane}</b><i className={`fx-dot ${laneKind(lane)}`} /></span>)}</span><em>{consensusCard(round).value}</em></div>
+                  <div className="ov-row"><span>검증자</span><span className="ov-lanes">{flow.lanes.map((lane) => <span key={lane.lane}><b>{lane.lane}</b><i className={`fx-dot ${laneDotKind(lane)}`} /></span>)}</span><em>{consensusCard(round).value}</em></div>
                   <div className="ov-row"><span>실행 판정</span>{admission ? <b className={`fx-chip ${admission.decision === 'ALLOW' ? 'pass' : 'fail'}`}>{admission.decision}</b> : <b className="fx-chip">{pendingGateway}</b>}<em>{admission?.reasonCode ?? ''}</em></div>
                   <details className="fx-more"><summary>검증자별 기록 보기</summary><V3FlowMap flow={flow} compact /></details>
                 </>}
