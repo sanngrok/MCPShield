@@ -4,7 +4,7 @@ import React from "react";
 import type { Admission, Release, V3Round, V3Votes } from "../release-workflow";
 import type { Board } from "./v3-api";
 import { AI_WITNESS_NOTE, FINDING_TEXT, LANES, TEAM_RUN_NOTE, ago, clock, consensusCard, eventText, findingNote, findingsOf, groundsCard, roundOutcomeShort, runHistory,
-  severityCard, short, toolName, verdictCard, verdictKo, type Cell, type FlowView, type HistoryItem, type Step, type Witness } from "./v3-model";
+  severityCard, short, toolName, verdictCard, verdictKo, type Cell, type FlowView, type HistoryItem, type LaneView, type Step, type Witness } from "./v3-model";
 
 const mark = (tone: string) => <svg className="v3-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
   {tone === "pass" ? <path d="m5 12 4 4L19 6" /> : <><path d="M12 3 2.8 20h18.4L12 3Z" /><path d="M12 9v5M12 17h.01" /></>}</svg>;
@@ -64,6 +64,27 @@ function WitnessView({ witness }: { witness: Witness }) {
 
 const witnessLine = (witness: Witness) => witness.model ? `${witness.model} · ${witness.label}` : witness.label;
 
+// The flow map shows states only: a five-step stepper and one row of dots per validator. Hashes, grounds and transactions stay
+// in the page, inside each row and the chain-record block, and open on click.
+type DotKind = "pending" | "running" | "pass" | "fail" | "review" | "done" | "skip";
+const DOT_LABELS = ["재검사", "AI 증인", "서명 투표", "긴급 격리"];
+const cellKind = (cell: Cell): DotKind => cell.state === "pending" ? "pending" : cell.state === "running" ? "running" : cell.state === "failed" || cell.tone === "fail" ? "fail"
+  : cell.tone === "pass" ? "pass" : cell.tone === "review" ? "review" : "done";
+/** "skip" is a step that did not apply: no AI witness on this vote, or no quarantine used. A witness is never drawn in the PASS colour. */
+function laneDots(lane: LaneView): { kind: DotKind; tip: string }[] {
+  const witness: DotKind = lane.witness.state === "waiting" ? "pending" : lane.witness.state === "none" || lane.witness.state === "unknown" ? "skip" : lane.witness.tone === "review" ? "review" : "done";
+  const quarantine: DotKind = lane.quarantine.state === "done" && lane.quarantine.tone === "neutral" ? "skip" : cellKind(lane.quarantine);
+  return [{ kind: cellKind(lane.rescan), tip: lane.rescan.title }, { kind: witness, tip: witnessLine(lane.witness) },
+    { kind: cellKind(lane.signed), tip: lane.signed.title }, { kind: quarantine, tip: lane.quarantine.title }];
+}
+function laneChip(lane: LaneView): { kind: string; label: string } {
+  if (lane.voteKey !== "NONE") return { kind: lane.voteKey === "PASS" ? "pass" : lane.voteKey === "FAIL" ? "fail" : "review", label: verdictKo(lane.voteKey) };
+  const active = [lane.rescan, lane.signed].some((cell) => cell.state !== "pending");
+  return active ? { kind: "running", label: "검증 중" } : { kind: "pending", label: "대기" };
+}
+const stageKind = (step: Step): DotKind => step.state === "failed" ? "fail" : step.state === "running" ? "running" : step.state === "pending" ? "pending"
+  : step.tone === "fail" ? "fail" : step.tone === "review" ? "review" : "pass";
+
 /** Stage map: operator (register, announce) → validators A/B/C each on its own → 2-of-3 on chain → Gateway admission (API lookup). */
 export function V3FlowMap({ flow, compact = false }: { flow: FlowView; compact?: boolean }) {
   const [register, announce, lanes, decision, gateway] = flow.steps;
@@ -78,21 +99,33 @@ export function V3FlowMap({ flow, compact = false }: { flow: FlowView; compact?:
     </div>
     <p className="v3-note">A·B·C는 팀이 운영하는 역할 이름입니다 (SINGLE_INSTITUTION_DEMO). AI는 증인일 뿐 승인·폐기 권한이 없습니다.</p>
   </div>;
-  return <div className="v3-flow-wrap" data-flow data-raw>
-    <div className="v3-flow">
-      <div className="v3-col"><StepView step={register} /><StepView step={announce} /></div>
-      <div className="v3-lanes" data-step="lanes" data-state={lanes.state}>
-        <div className="v3-lanes-head"><small>{lanes.index} · {lanes.name}</small><b>{lanes.title}</b><span>{lanes.caption}</span></div>
-        {flow.lanes.map((lane) => <div className="v3-lane" key={lane.lane} data-lane={lane.lane} data-vote={lane.voteKey}>
+  return <div className="v3-flow-wrap fx" data-flow data-raw>
+    <ol className="fx-stepper">{flow.steps.map((step) => { const kind = stageKind(step); return <li className={`fx-stage ${kind}`} key={step.key} data-stage={step.key}>
+      <span className="fx-node">{kind === "pass" ? mark("pass") : kind === "fail" ? mark("fail") : step.index}</span>
+      <b>{step.name}</b><small><Text value={step.title} /></small>
+    </li>; })}</ol>
+    <div className="fx-validators">
+      <div className="fx-head"><b>{lanes.name}</b><span className="fx-track">{DOT_LABELS.map((label) => <i key={label}>{label}</i>)}</span><em>판정</em></div>
+      {flow.lanes.map((lane) => { const chip = laneChip(lane); return <details className="fx-lane" key={lane.lane} data-lane={lane.lane} data-vote={lane.voteKey}>
+        <summary>
+          <span className="fx-who"><i>{lane.lane}</i>검증자 {lane.lane}</span>
+          <span className="fx-track">{laneDots(lane).map((dot, index) => <i key={DOT_LABELS[index]} className={`fx-dot ${dot.kind}`} data-tip={`${DOT_LABELS[index]} · ${dot.tip}`} />)}</span>
+          <span className={`fx-chip ${chip.kind}`}>{chip.label}</span>
+        </summary>
+        <div className="v3-lane">
           <div className="v3-cell v3-lane-head"><b>검증자 {lane.lane}</b><span>역할 · {lane.role}</span><code title={lane.address ?? ""}>{short(lane.address)}</code></div>
           <CellView cell={lane.rescan} label="자기 사본 재검사" />
           <WitnessView witness={lane.witness} />
           <CellView cell={lane.signed} label="서명 투표" />
           <CellView cell={lane.quarantine} label="긴급 격리" extra={{ "data-quarantine": lane.quarantine.title.startsWith("긴급 격리 실행") ? "yes" : "no" }} />
-        </div>)}
-      </div>
-      <div className="v3-col"><StepView step={decision} extra={{ "data-decision": flow.outcome ?? "NONE" }} /><StepView step={gateway} extra={{ "data-gateway": flow.gateway ?? "NONE" }} /></div>
+        </div>
+      </details>; })}
+      <p className="fx-legend"><i className="fx-dot pass" /> 통과 <i className="fx-dot running" /> 진행 중 <i className="fx-dot fail" /> 실패 <i className="fx-dot review" /> 보류 <i className="fx-dot skip" /> 해당 없음 <span>줄을 누르면 근거와 거래를 볼 수 있습니다</span></p>
     </div>
+    <details className="fx-more">
+      <summary>등록 · 라운드 · 판정의 체인 기록 보기</summary>
+      <div className="fx-more-grid"><StepView step={register} /><StepView step={announce} /><StepView step={decision} extra={{ "data-decision": flow.outcome ?? "NONE" }} /><StepView step={gateway} extra={{ "data-gateway": flow.gateway ?? "NONE" }} /></div>
+    </details>
     <p className="v3-note">{TEAM_RUN_NOTE}<br />{AI_WITNESS_NOTE}{flow.lanes.some((lane) => lane.signed.tx?.label) && ` ${RELAY_TX_NOTE}`}</p>
   </div>;
 }
