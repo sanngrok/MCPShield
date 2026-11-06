@@ -313,3 +313,26 @@ body,.workspace{font-family:'Sora','IBM Plex Sans KR','Malgun Gothic','Apple SD 
 .fx .v3-note{padding:12px 24px 18px}
 @media(max-width:900px){.fx-stage>small{display:none}.fx-head,.fx-lane>summary{grid-template-columns:104px minmax(0,1fr) 84px;gap:8px;padding:0 12px}.fx-more-grid{grid-template-columns:1fr 1fr}.fx-lane>.v3-lane{grid-template-columns:1fr 1fr}.fx-legend span{margin-left:0;flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.fx-dot.running,.fx-chip.running::before,.fx-stage.running .fx-node{animation:none}}
+
+/* Overview: how it works (stills from the team's intro film, ./how) and the live chain state per release. */
+.ov-section{margin-top:36px}.ov-section:first-of-type{margin-top:0}
+.ov-title{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}.ov-title small{font-size:12px;letter-spacing:.14em;color:#9aa29b}.ov-title h2{font:500 20px 'IBM Plex Sans KR',sans-serif;margin:0}.ov-title span{font-size:13px;color:#8e968f;margin-left:auto}
+.how-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.how-card{border:1px solid #252a26;background:#0b0e0c;display:flex;flex-direction:column;min-width:0;overflow:hidden;transition:border-color .25s ease}.how-card:hover{border-color:#4f6a1c}.how-card.wide{grid-column:span 2}
+.how-img{height:180px;background:#050706 center/cover no-repeat;border-bottom:1px solid #202421}
+.how-img.fingerprint{background-image:url(./how/fingerprint.jpg)}.how-img.layers{background-image:url(./how/layers.jpg)}.how-img.validators{background-image:url(./how/validators.jpg)}
+.how-img.quorum{background-image:url(./how/quorum.jpg)}.how-img.gateway{background-image:url(./how/gateway.jpg)}.how-img.blocked{background-image:url(./how/blocked.jpg)}
+.how-body{padding:16px 18px 18px}.how-body small{display:block;font-size:12px;letter-spacing:.1em;color:#c6ff2e}.how-body b{display:block;font:600 17px/1.35 'IBM Plex Sans KR',sans-serif;margin:8px 0 6px}.how-body p{margin:0;font:400 13px/1.6 'IBM Plex Sans KR',sans-serif;color:#a0a7a1}
+.ov-card{display:flex;flex-direction:column;position:relative;overflow:hidden}
+.ov-card::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:#303631}.ov-card.pass::before{background:#7cff88}.ov-card.fail::before{background:#ff5a5a}
+.ov-card.pass{background:linear-gradient(160deg,rgba(40,82,27,.18),transparent 55%),#0e110f}.ov-card.fail{background:linear-gradient(160deg,rgba(96,32,32,.22),transparent 55%),#0e110f}
+.ov-card>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px 22px 16px}.ov-card>header small{font:12px var(--mono);color:#9aa29b}
+.ov-card h3{display:flex;align-items:center;gap:10px;font:600 24px 'IBM Plex Sans KR',sans-serif;margin:8px 0 0}.ov-card h3 code{font:400 12px var(--mono);color:#9aa29b;border:1px solid #2c332d;padding:3px 7px}
+.ov-card.pass h3{color:#7cff88}.ov-card.fail h3{color:#ff6868}
+.ov-row{display:grid;grid-template-columns:90px auto 1fr;align-items:center;gap:14px;padding:13px 22px;border-top:1px solid #202421;font-size:13px}.ov-row>span:first-child{color:#9aa29b}.ov-row>em{font:normal 12px var(--mono);justify-self:end;color:#a7ada7}
+.ov-lanes{display:flex;gap:18px}.ov-lanes>span{display:flex;align-items:center;gap:7px}.ov-lanes b{font-weight:500}.ov-row .fx-chip{justify-self:start}
+.ov-card .fx-more{margin:0;padding:8px 22px 10px;border-top:1px solid #202421}.ov-card .v3-card-foot{margin-top:auto}
+.ov-note{margin:14px 0 0;font-size:12px;line-height:1.6;color:#8e968f}
+@media(max-width:1100px){.how-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.how-grid{grid-template-columns:1fr}.how-card.wide{grid-column:auto}}
+.how-img.quorum{background-position:left center}
