@@ -23,7 +23,7 @@ test("plain Node shared reader pins exact identity, both decision views, freshne
 test("ADR-009: a grown head keeps a canonical view, a newer denial or reorg never yields the first allow", async () => {
   const rpc = await syntheticRpc("fresh-view"), reader = v2ChainReader({ ...rpc, confirmations: 2 });
   try {
-    // Base produces a block every 2 s; a head that grew by up to MAX_HEAD_ADVANCE blocks is not a reason to deny.
+    // Base Sepolia produced about 5 blocks a second when measured; a head that grew by up to MAX_HEAD_ADVANCE blocks is not a reason to deny.
     for (const mode of ["moving-head", "continuous-head", "lagging-backend"]) {
       rpc.mode = mode; rpc.counts.clear(); rpc.requests.length = 0;
       const decision = await reader(rpc.identity, rpc);

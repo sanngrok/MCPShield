@@ -1,4 +1,4 @@
-# ADR-009: 2초 블록 체인에서의 Gateway 체인 읽기 — "머리 고정" 대신 "읽은 블록이 그대로인가"
+# ADR-009: 빠른 블록 체인(Base Sepolia 실측 약 0.2초)에서의 Gateway 체인 읽기 — "머리 고정" 대신 "읽은 블록이 그대로인가"
 
 - Status: Accepted
 - Scope: `packages/contracts-sdk/src/v2-chain-reader.mjs` (Gateway 직접 RPC 판정, `/ledger` 화면), `apps/gateway/src/admission-fallback.mjs` 시간 예산

@@ -1,7 +1,7 @@
 # ADR-007: 레지스트리 owner 권한 — MVP는 단일 관리자, 운영은 컨소시엄 멀티시그
 
 - Status: Accepted
-- Scope: V2 컨트랙트(`ValidatorRegistry`, `PolicyRegistry`, `ReleaseRegistryV2`)의 관리자 권한 운영
+- Scope: V2 컨트랙트(`ValidatorRegistry`, `PolicyRegistry`, `ReleaseRegistryV2`)의 관리자 권한 운영. V3(`ReleaseRegistryV3`)도 같은 `ValidatorRegistry`·`PolicyRegistry`를 쓴다
 - Date: 2026-10-11
 - Related: 1차 멘토링(2026-10) M6, M12, M18, M19
 
@@ -9,7 +9,7 @@
 
 - **MVP:** 배포 지갑 하나가 관리자(owner)다. 데모에서는 Ganache 테스트 계정 0번이다. 이것을 숨기지 않고 공개한다.
 - **MVP의 owner는 운영사 relayer 핫키이기도 하다.** 릴리스 등록·정책 게시·폐지가 owner 전용인데 이 거래를 운영사 API의 relayer가 보내므로, 운영사 API 프로세스가 쥔 relayer 키가 곧 owner 키다([`apps/api/src/chain-outbox.ts:52-54`](../apps/api/src/chain-outbox.ts#L52-L54), [`apps/api/src/control-config.ts:60`](../apps/api/src/control-config.ts#L60), [`contracts/scripts/deploy-v2.ts:20-23`](../contracts/scripts/deploy-v2.ts#L20-L23)). 장면 하네스도 계정 0번을 배포자와 relayer로 함께 쓴다. 그래서 운영사 API 프로세스 전체가 장악되면 REVOKED→VERIFIED는 여전히 불가하고 체인을 읽는 Gateway B는 REVOKED를 계속 차단하지만, `disable`·`deprecate`로 정상 릴리스까지 A·B 모두 fail closed될 수 있다(서비스 거부).
-- **운영 계획:** 컨소시엄 참여사들의 멀티시그(예: Safe 3-of-5)를 관리자로 두고 배포한다. owner(멀티시그)와 relayer 키를 분리하고, relayer는 검증자 서명 제출과 긴급 격리 제출만 맡는다. 다음 컨트랙트 버전에서 `deprecate`·`registerRelease`에는 타임락을 두고, `disable`은 키 유출 대응용이라 짧은 지연 또는 멀티시그 정족수로 제한한다. 비상 절차를 문서화한다.
+- **운영 계획:** 컨소시엄 참여사들의 멀티시그(예: Safe 3-of-5)를 관리자로 두고 배포한다. owner(멀티시그)와 relayer 키를 분리하고, relayer는 검증자 서명 제출과 긴급 격리 제출만 맡는다. 다음 컨트랙트 버전은 권한 방향에 따라 다르게 둔다(2026-11, 4회차 멘토링 반영): 막는 관리자 권한(`disable`·`deprecate`)은 지금처럼 즉시 실행하되 멀티시그 정족수를 거치고, 허용하는 쪽(검증자 교체 발효, 재활성화가 생긴다면 그것)은 타임락과 더 높은 정족수를 둔다. 긴급 격리는 관리자 권한이 아니라 검증자 권한이므로 지금처럼 검증자 한 곳이 정족수 없이 바로 건다. 정책 게시와 `registerRelease`는 혼자서 허용 효과가 없어(릴리스는 PASS 2표, 정책은 검증자와 Gateway 설정에도 들어가야 함) 타임락을 두지 않는다. 지금 코드도 이미 이 방향이다: 비활성화·정책 폐지·격리는 즉시, 교체 발효는 1일 뒤이고, 재활성화·정책 폐지 취소·REVOKED 되돌리기·격리 조기 종료·소유권 이전은 함수가 없다. 비상 절차를 문서화한다.
 - 핵심 사실: **owner 키가 탈취되어도 체인의 REVOKED를 VERIFIED로 바꿀 수 없다.** owner의 즉시 권한은 서비스 거부(fail closed)를 일으킬 수 있지만 거짓 허용을 만들지는 못한다. 다만 1일 지연 뒤에는 검증자 교체로 거짓 VERIFIED를 만들 수 있다(아래 Reason).
 
 ### owner가 할 수 있는 것 (코드 기준)
@@ -46,7 +46,7 @@ owner 자리는 3개(`ValidatorRegistry`, `PolicyRegistry`, `ReleaseRegistryV2`)
 
 - **MVP부터 멀티시그 배포:** 가장 안전하지만 데모 준비 시간 대비 효과가 작다. 데모의 검증자도 팀 운영이므로([ADR-003](adr-003-validator-consortium.md)) 관리자만 분리해도 독립성 주장이 생기지 않는다.
 - **owner 권한 제거(완전 무관리자):** 탈취된 검증자 키를 막을 비상 수단(`disable`)도 사라진다.
-- **모든 권한에 긴 타임락:** `disable`은 탈취된 검증자 키를 막는 비상 수단이라 지연을 길게 둘 수 없다. 짧은 지연과 멀티시그 정족수의 조합을 다음 버전에서 검토한다.
+- **모든 권한에 긴 타임락:** `disable`은 탈취된 검증자 키를 막는 비상 수단이라 지연을 길게 둘 수 없다. 그래서 권한을 방향으로 나눈다: 막는 관리자 권한은 즉시 + 멀티시그 정족수(긴급 격리는 지금처럼 검증자 한 곳이 즉시), 허용하는 쪽만 타임락(Decision).
 
 ## Consequences
 
@@ -54,13 +54,13 @@ owner 자리는 3개(`ValidatorRegistry`, `PolicyRegistry`, `ReleaseRegistryV2`)
 |---|---|---|
 | 관리자 | 단일 배포 지갑(= 운영사 relayer 키), 공개 | 컨소시엄 멀티시그 (예: Safe 3-of-5). relayer 키와 분리 |
 | 적용 방법 | — | owner가 immutable이므로 **재배포** 필요. 검증자·정책 레지스트리는 `V2_GOVERNANCE_ADMIN`으로 멀티시그 주소를 이미 줄 수 있다(재배포만 필요). `ReleaseRegistryV2`는 owner가 항상 배포 지갑이라 스크립트 수정이 필요하다. 또 운영사 relayer가 보내던 정책 게시·폐지·릴리스 등록([`chain-outbox.ts:52-54`](../apps/api/src/chain-outbox.ts#L52-L54))을 멀티시그 제안 흐름으로 바꿔야 한다(그대로 두면 `ONLY_OWNER`로 실패) |
-| 즉시 권한 (`disable`·`deprecate`·`registerRelease`) | 타임락 없음 | 다음 컨트랙트 버전에서 `deprecate`·`registerRelease`는 타임락, `disable`은 짧은 지연 또는 멀티시그 정족수 |
+| 즉시 권한 (`disable`·`deprecate`·`registerRelease`) | 타임락 없음 | 막는 관리자 권한(`disable`·`deprecate`)은 즉시 + 멀티시그 정족수, 허용하는 쪽(교체 발효, 재활성화가 생긴다면 그것)은 타임락 + 더 높은 정족수. 긴급 격리는 지금처럼 검증자 한 곳이 즉시(정족수 없음). 정책 게시·`registerRelease`는 혼자서 허용 효과가 없어 타임락을 두지 않음 |
 | 거버넌스 이벤트 감시 | 없음 (indexer가 교체·비활성화·폐지 이벤트를 보지 않음) | 교체 예약·비활성화·정책 폐지 알림 |
-| 비상 절차 | 이 문서의 계획만 있음, 훈련 안 함 | 아래 절차를 문서화하고 훈련 |
+| 비상 절차 | 로컬 체인 리허설 1회(2026-11-03: 정상 교체, 키 유출, 두 키 비활성화. [결과](../benchmarks/results/key-rotation-rehearsal-2026-11-03/README.md)). 공개 체인 훈련은 안 함 | 아래 절차를 문서화하고 훈련 |
 
 비상 절차 (계획):
 
-1. **검증자 키 탈취:** `disable`(즉시) → 새 검증자 교체 예약 → 1일 뒤 `rotate` → 모든 릴리스 재검증 → Gateway의 검증자 집합 버전 설정 갱신.
+1. **검증자 키 탈취:** `disable`(즉시) → 그 키가 이미 건 긴급 격리(V3 `ReleaseQuarantined` 이벤트) 확인 → 새 검증자 교체 예약 → 1일 뒤 `rotate` → 모든 릴리스 재검증 → Gateway의 검증자 집합 버전 설정 갱신. `disable`은 이미 걸린 격리를 풀지 않으므로, 그 릴리스는 격리가 끝날 때까지(최대 1일) 막힌다(2026-11-03 리허설). 끄기 전까지는 그 키의 표와 격리가 유효하므로 확인보다 `disable`이 먼저다.
 2. **예정에 없던 교체 예약 발견:** Gateway의 검증자 집합 버전 설정을 올리지 않는다(fail closed 유지). 컨소시엄에 공지한다.
 3. **owner 키 탈취 확정:** 새 멀티시그로 재배포 → 정책 게시·릴리스 재등록·재검증 → Gateway의 레지스트리 주소·버전 교체.
 
