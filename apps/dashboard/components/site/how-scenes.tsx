@@ -29,7 +29,7 @@ const Runner = ({ id, path, dur, begin = '0s', r = 4 }: { id: string; path: stri
   <circle r={r} className="sc-runner" filter={`url(#${id}-glow)`}><animateMotion dur={dur} begin={begin} repeatCount="indefinite" path={path} /></circle>
 
 const Label = ({ x, y, w, title, sub, tone = '' }: { x: number; y: number; w: number; title: string; sub: string; tone?: string }) => <g className={`sc-label ${tone}`}>
-  <rect x={x} y={y} width={w} height="56" rx="8" /><rect x={x} y={y + 10} width="3" height="36" className="sc-label-bar" />
+  <rect x={x} y={y} width={w} height="56" rx="8" />
   <text x={x + 18} y={y + 24} className="sc-label-title">{title}</text><text x={x + 18} y={y + 43} className="sc-label-sub">{sub}</text>
 </g>
 
@@ -49,7 +49,7 @@ function Fingerprint() {
     <Cube x={205} y={160} w={150} h={150} />
     <Envelope x={235} y={205} w={90} h={60} />
     <ellipse cx="315" cy="150" rx="135" ry="30" className="sc-scan" filter={`url(#${id}-glow)`} />
-    <g className="sc-label"><rect x="392" y="96" width="222" height="112" rx="8" /><rect x="392" y="108" width="3" height="88" className="sc-label-bar" />
+    <g className="sc-label"><rect x="392" y="96" width="222" height="112" rx="8" />
       <text x="410" y="122" className="sc-label-title">EXACT RELEASE</text>
       {['artifact  sha256:a345…f422', 'manifest  sha256:ee9…da20', 'tools     0xb701…d020'].map((row, index) => <text key={row} x="410" y={148 + index * 22} className="sc-hash" style={{ animationDelay: `${0.4 + index * 0.9}s` }}>{row}  ✓</text>)}
     </g>
