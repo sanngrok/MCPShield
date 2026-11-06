@@ -21,49 +21,52 @@ body { margin: 0; background: #fff; }
 .gpt-side { display: flex; flex-direction: column; min-height: 0; padding: 8px 6px 0; background: var(--gpt-side); border-right: 1px solid #ededed; }
 .gpt-side-head { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 6px 0 10px; margin-bottom: 8px; }
 .gpt-brand { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
-.gpt-side-tools { display: flex; gap: 4px; color: var(--gpt-muted); }
+.gpt-side-tools { display: flex; gap: 4px; color: var(--gpt-faint); }
 .gpt-side-tools button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; }
 .gpt-side-tools button:hover { background: var(--gpt-hover); }
 .gpt-nav { display: grid; gap: 1px; }
-.gpt-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border-radius: 10px; text-align: left; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpt-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px; border-radius: 10px; text-align: left; font-size: 14px; color: #303030; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gpt-row:hover, .gpt-row.active { background: var(--gpt-hover); }
+.gpt-row.active { color: var(--gpt-text); }
 .gpt-row.plain { display: block; line-height: 36px; }
 .gpt-side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
-.gpt-section { margin: 28px 10px 8px; font-size: 14px; color: var(--gpt-faint); }
+.gpt-section { margin: 28px 10px 12px; font-size: 14px; color: var(--gpt-faint); }
 
 /* Main */
 .gpt-main { position: relative; min-width: 0; overflow-y: auto; background: radial-gradient(ellipse 70% 45% at 55% 50%, #fff 0%, #fcfcfc 70%); }
 .gpt-center { width: min(768px, calc(100% - 48px)); margin: 0 auto; padding-top: calc(43dvh - 17px); }
-.gpt-greeting { margin: 0 0 30px; text-align: center; font-size: 28px; font-weight: 500; letter-spacing: -.015em; }
+.gpt-greeting { margin: 0 0 32px; text-align: center; font-size: 24px; font-weight: 400; letter-spacing: -.015em; }
 .gpt-composer { position: relative; }
 .gpt-box { display: flex; align-items: center; gap: 6px; min-height: 56px; padding: 8px 10px; background: #fff; border: 1px solid var(--gpt-line); border-radius: 28px; box-shadow: 0 4px 18px rgba(0, 0, 0, .05), 0 0 1px rgba(0, 0, 0, .06); }
 .gpt-plus, .gpt-mic { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; }
 .gpt-plus:hover, .gpt-mic:hover, .gpt-plus[aria-expanded="true"] { background: #f3f3f3; }
 .gpt-input { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 0; outline: 0; resize: none; background: transparent; font-size: 16px; line-height: 24px; }
 .gpt-input::placeholder { color: var(--gpt-faint); }
-.gpt-think { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 18px; color: var(--gpt-muted); font-size: 15px; }
+.gpt-think { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 18px; color: var(--gpt-faint); font-size: 15px; }
 .gpt-think:hover { background: #f3f3f3; }
 .gpt-mic { color: var(--gpt-text); }
 .gpt-voice { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--gpt-blue); color: #fff; }
 .gpt-voice .gpt-icon { stroke-width: 2.2; }
-.gpt-suggest { margin: 26px 0 0; padding: 0; list-style: none; }
-.gpt-suggest button { display: flex; align-items: center; gap: 16px; height: 52px; padding: 0 14px; color: var(--gpt-muted); font-size: 16px; border-radius: 14px; }
+.gpt-suggest { margin: 22px 0 0; padding: 0; list-style: none; }
+.gpt-suggest button { display: flex; align-items: center; gap: 16px; height: 52px; padding: 0 14px; color: var(--gpt-faint); font-size: 16px; border-radius: 14px; }
+.gpt-suggest button:not(:hover) .gpt-icon { color: var(--gpt-muted); }
 .gpt-suggest button:hover { background: #f3f3f3; color: var(--gpt-text); }
 
 /* + menu */
-.gpt-menu { position: absolute; z-index: 5; top: calc(100% + 8px); left: 0; right: 0; max-height: max(180px, min(520px, calc(57dvh - 130px))); overflow-y: auto; padding: 8px; background: #fff; border: 1px solid #ececec; border-radius: 24px; box-shadow: 0 12px 40px rgba(0, 0, 0, .1); }
-.gpt-item { display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 12px; border-radius: 12px; text-align: left; white-space: nowrap; }
-.gpt-item:hover, .gpt-item:focus-visible { background: #f3f3f3; outline: 0; }
-.gpt-item b { font-weight: 400; font-size: 15px; }
-.gpt-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--gpt-faint); font-size: 15px; }
+.gpt-menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0; max-height: max(180px, min(520px, calc(57dvh - 130px))); overflow-y: auto; padding: 14px 8px 10px; background: #fff; border: 1px solid #ececec; border-radius: 24px; box-shadow: 0 12px 40px rgba(0, 0, 0, .1); }
+.gpt-item { display: flex; align-items: center; gap: 12px; width: 100%; height: 36px; padding: 0 8px; border-radius: 12px; text-align: left; white-space: nowrap; }
+.gpt-item:hover { background: #f3f3f3; }
+.gpt-item:focus-visible { background: #f3f3f3; outline: 2px solid var(--gpt-blue); outline-offset: -2px; }
+.gpt-item b { font-weight: 400; font-size: 14px; }
+.gpt-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--gpt-faint); font-size: 14px; }
 .gpt-item i { font-style: normal; font-size: 14px; }
 .gpt-item.shield img { flex: none; border-radius: 5px; }
 .gpt-pill { flex: none; padding: 2px 8px; border-radius: 999px; background: #fdecec; color: #d92d20; font-size: 12px; font-weight: 600; font-style: normal; line-height: 18px; }
-.gpt-menu-hint { margin: 4px 12px 6px; color: var(--gpt-faint); font-size: 14px; }
+.gpt-menu-hint { margin: 4px 8px 6px; color: var(--gpt-faint); font-size: 14px; }
 
 /* MCP Shield launcher: the spot where the chat app keeps its model picker, with an update badge that keeps hopping. */
 .gpt-shield {
-  position: absolute; z-index: 3; top: 12px; left: 16px; display: grid; place-items: center; width: 44px; height: 44px;
+  position: absolute; z-index: 3; top: 22px; left: 16px; display: grid; place-items: center; width: 44px; height: 44px;
   border-radius: 50%; background: #fff; border: 1px solid var(--gpt-line); box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
   transform-origin: 50% 100%; animation: gpt-hop 2.8s cubic-bezier(.3, .7, .4, 1) .6s infinite;
 }
@@ -73,7 +76,7 @@ body { margin: 0; background: #fff; }
 .gpt-badge {
   position: absolute; top: -4px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border: 2px solid #fff; border-radius: 10px;
   background: var(--gpt-red); color: #fff; font-size: 11px; font-weight: 700; line-height: 15px; text-align: center;
-  animation: gpt-pop .5s cubic-bezier(.34, 1.56, .64, 1) .3s both;
+  animation: gpt-pop .5s cubic-bezier(.34, 1.56, .64, 1) .3s backwards;
 }
 .gpt-badge::after { content: ""; position: absolute; z-index: -1; inset: -2px; border-radius: inherit; background: var(--gpt-red); animation: gpt-ping 1.8s ease-out 1s infinite; }
 .gpt-tip {

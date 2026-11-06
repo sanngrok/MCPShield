@@ -88,22 +88,22 @@ export function ChatHome({ name, logoSrc }: { name: string; logoSrc: string }) {
 
         <section className="gpt-center">
           <h1 className="gpt-greeting">{name}님, 반갑습니다.</h1>
-          <div className="gpt-composer" ref={composer}>
+          <div className="gpt-composer" ref={composer} onBlur={(event) => { const next = event.relatedTarget as Node | null; if (next && !event.currentTarget.contains(next)) setMenuOpen(false); }}>
             <div className="gpt-box">
-              <button type="button" className="gpt-plus" aria-label="파일 및 도구 추가" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Icon name="plus" /></button>
+              <button type="button" className="gpt-plus" aria-label="파일 및 도구 추가" aria-expanded={menuOpen} aria-controls="gpt-tools" onClick={() => setMenuOpen((open) => !open)}><Icon name="plus" /></button>
               <textarea className="gpt-input" rows={1} placeholder="ChatGPT에게 물어보세요" aria-label="메시지" />
               <button type="button" className="gpt-think"><Icon name="think" />Think</button>
               <button type="button" className="gpt-mic" aria-label="받아쓰기"><Icon name="mic" /></button>
               <button type="button" className="gpt-voice" aria-label="음성 모드 시작"><Icon name="wave" /></button>
             </div>
             {menuOpen && (
-              <div className="gpt-menu" role="menu">
-                {TOOLS.map(([icon, label, hint]) => <button type="button" role="menuitem" className="gpt-item" key={label} onClick={() => setMenuOpen(false)}><Icon name={icon} /><b>{label}</b><span>{hint}</span></button>)}
-                <a role="menuitem" className="gpt-item shield" href={SHIELD_HREF}>
+              <div className="gpt-menu" id="gpt-tools">
+                {TOOLS.map(([icon, label, hint]) => <button type="button" className="gpt-item" key={label} onClick={() => setMenuOpen(false)}><Icon name={icon} /><b>{label}</b><span>{hint}</span></button>)}
+                <a className="gpt-item shield" href={SHIELD_HREF}>
                   <img src={logoSrc} alt="" width={20} height={20} /><b>MCP Shield</b><span>MCP 업데이트를 실행 전에 검사합니다</span>
                   <em className="gpt-pill">업데이트 {PENDING_UPDATES}</em>
                 </a>
-                {PLUGINS.map(([icon, label, hint]) => <button type="button" role="menuitem" className="gpt-item" key={label} onClick={() => setMenuOpen(false)}><Icon name={icon} /><b>{label}</b><span>{hint}</span><i>연결</i></button>)}
+                {PLUGINS.map(([icon, label, hint]) => <button type="button" className="gpt-item" key={label} onClick={() => setMenuOpen(false)}><Icon name={icon} /><b>{label}</b><span>{hint}</span><i>연결</i></button>)}
                 <p className="gpt-menu-hint">플러그인을 검색하려면 입력하세요</p>
               </div>
             )}
