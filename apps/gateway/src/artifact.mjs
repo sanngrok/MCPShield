@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertImportPolicy, runtimeEgressIssues } from "../../../packages/artifact-policy/import-policy.mjs";
@@ -85,7 +85,9 @@ export async function createArtifactSnapshot(sourceDirectory) {
 
   const digest = createHash("sha256");
   for (const file of files) digest.update(file.path).update("\0").update(file.content).update("\0");
-  const snapshotRoot = await mkdtemp(join(tmpdir(), "mcpshield-artifact-"));
+  // Real path: on macOS the default /tmp is a symlink to /private/tmp. The tool runs with --allow-fs-read=<snapshot root>,
+  // and Node cannot read its own entrypoint when that grant names the /tmp alias, so the tool exits before the MCP handshake.
+  const snapshotRoot = await mkdtemp(join(await realpath(tmpdir()), "mcpshield-artifact-"));
   try {
     for (const file of files) {
       const destination = join(snapshotRoot, ...file.path.split("/"));
