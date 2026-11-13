@@ -10,6 +10,7 @@ cache/
 out/
 tmp/
 .next/
+*.tsbuildinfo
 *.log
 *.db
 *.db-wal
